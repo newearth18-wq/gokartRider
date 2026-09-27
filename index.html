@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=4-0" />
+    <link rel="stylesheet" href="style.css?v=5-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -65,6 +65,8 @@
             <label class="name-label" for="playerName">ชื่อผู้เล่น</label>
             <input id="playerName" maxlength="18" autocomplete="nickname" value="Rider" />
             <div class="room-actions"><button id="createRoomButton" class="primary-button" type="button">สร้างห้อง 50 คน <span>→</span></button><div class="join-room"><input id="roomCode" maxlength="5" placeholder="รหัสห้อง" aria-label="รหัสห้อง" /><button id="joinRoomButton" type="button">เข้าห้อง</button></div></div>
+            <button id="scanQrButton" class="scan-qr-button" type="button">📷 สแกน QR เพื่อเข้าห้อง</button>
+            <p id="inviteNotice" class="invite-notice" role="status" hidden></p>
             <p id="networkStatus" class="network-status" role="status">กำลังตรวจเซิร์ฟเวอร์…</p>
           </div>
           <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · ↑ / W เร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ลากแป้นเลี้ยวด้านซ้าย · กด DRIFT เข้าโค้ง · หมุนจอแนวนอนเพื่อมุมมองกว้าง</span></div>
@@ -90,8 +92,12 @@
       </section>
 
       <section id="lobby" class="overlay" aria-labelledby="lobbyTitle" hidden>
-        <div class="modal-card lobby-card"><div class="eyebrow">LIVE RACE ROOM</div><h2 id="lobbyTitle">ห้อง <span id="lobbyCode"></span></h2><p id="lobbyDetails"></p><div class="lobby-count"><strong id="lobbyCount">1</strong><span>/ 50 คน</span></div><div id="lobbyPlayers" class="lobby-players"></div><button id="lobbyStart" class="primary-button" type="button">เริ่มแข่ง <span>→</span></button><button id="lobbyLeave" class="text-button" type="button">ออกจากห้อง</button><p class="lobby-hint">ส่งรหัสห้องให้เพื่อน แล้วให้เพื่อนกด “เข้าห้อง”</p></div>
+        <div class="modal-card lobby-card"><div class="eyebrow">LIVE RACE ROOM</div><h2 id="lobbyTitle">ห้อง <span id="lobbyCode"></span></h2><p id="lobbyDetails"></p><div class="lobby-count"><strong id="lobbyCount">1</strong><span>/ 50 คน</span></div><div class="lobby-invite"><canvas id="roomQr" width="300" height="300" role="img" aria-label="QR สำหรับสแกนเข้าห้องแข่ง"></canvas><p>ให้นักเรียนสแกน QR นี้ด้วยกล้องมือถือเพื่อเข้าห้อง</p><a id="inviteUrl" class="invite-url" href="#" target="_blank" rel="noopener"></a><div class="invite-actions"><button id="expandQrButton" type="button">ขยาย QR</button><button id="copyInviteButton" type="button">คัดลอกลิงก์</button></div></div><div id="lobbyPlayers" class="lobby-players"></div><button id="lobbyStart" class="primary-button" type="button">เริ่มแข่ง <span>→</span></button><button id="lobbyLeave" class="text-button" type="button">ออกจากห้อง</button><p class="lobby-hint">เข้าห้องได้สูงสุด 50 คน · เริ่มแข่งขันเมื่อทุกคนพร้อม</p></div>
       </section>
+
+      <section id="qrFullscreen" class="overlay qr-fullscreen" aria-labelledby="qrFullscreenTitle" hidden><div class="modal-card qr-fullscreen-card"><h2 id="qrFullscreenTitle">สแกนเพื่อเข้าห้อง <span id="qrFullscreenCode"></span></h2><canvas id="roomQrLarge" width="480" height="480" role="img" aria-label="QR ขนาดใหญ่สำหรับเข้าห้องแข่ง"></canvas><p>เปิดกล้องมือถือ สแกน QR แล้วรอในห้องก่อนเริ่มแข่ง</p><button id="closeQrFullscreen" class="primary-button" type="button">กลับไปที่ห้อง</button></div></section>
+
+      <section id="qrScanner" class="overlay" aria-labelledby="qrScannerTitle" hidden><div class="modal-card scanner-card"><div class="eyebrow">JOIN BY QR</div><h2 id="qrScannerTitle">สแกน QR ห้องแข่ง</h2><video id="scannerVideo" autoplay muted playsinline aria-label="ภาพจากกล้องสำหรับสแกน QR"></video><p id="scannerStatus" role="status">กำลังเปิดกล้อง…</p><button id="closeQrScanner" class="primary-button" type="button">ปิดกล้อง</button></div></section>
 
       <section id="pauseMenu" class="overlay" aria-labelledby="pauseTitle" hidden>
         <div class="modal-card"><div class="eyebrow">RACE PAUSED</div><h2 id="pauseTitle">พักก่อนนะ!</h2><p>พร้อมซิ่งต่อเมื่อไหร่กดปุ่มด้านล่าง</p><button id="resumeButton" class="primary-button" type="button">แข่งต่อ <span>→</span></button><button id="restartButton" class="text-button" type="button">เริ่มแข่งใหม่</button></div>
@@ -109,6 +115,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=4-0"></script>
+    <script type="module" src="game.js?v=5-0"></script>
   </body>
 </html>

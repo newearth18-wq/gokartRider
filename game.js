@@ -2,6 +2,7 @@ import * as THREE from './vendor/three.module.js';
 import { TRACKS, CHARACTERS, MAX_PLAYERS, RACE_LAPS } from './config.js';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
+import { qrcode } from './vendor/qrcode.mjs';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -85,6 +86,11 @@ let editingIndex = 0;
 let shieldTime = 0;
 let pulseTime = 0;
 let lastLeaderboardUpdate = 0;
+let renderedRoomQr = '';
+let scannerStream = null;
+let scannerTimer = null;
+let scannerActive = false;
+let scannerDetector = null;
 const network = new RaceConnection(onNetworkMessage, onNetworkClose);
 let game = freshGame();
 
@@ -814,12 +820,132 @@ function setNetworkStatus(message, error = false) {
   ui.networkStatus.classList.toggle('error', error);
 }
 
+function roomInviteUrl(code) {
+  const url = new URL(location.pathname, location.origin);
+  url.searchParams.set('room', code);
+  return url.href;
+}
+
+function drawRoomQr(canvas, url) {
+  const qr = qrcode(0, 'M');
+  qr.addData(url);
+  qr.make();
+  const ctx = canvas.getContext('2d');
+  const count = qr.getModuleCount();
+  const cell = Math.floor(canvas.width / (count + 8));
+  const offset = Math.floor((canvas.width - cell * count) / 2);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#101721';
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      if (qr.isDark(row, col)) ctx.fillRect(offset + col * cell, offset + row * cell, cell, cell);
+    }
+  }
+}
+
+function showRoomQr(code) {
+  const url = roomInviteUrl(code);
+  const link = $('#inviteUrl');
+  link.href = url;
+  link.textContent = url;
+  $('#qrFullscreenCode').textContent = code;
+  if (renderedRoomQr === code) return;
+  drawRoomQr($('#roomQr'), url);
+  drawRoomQr($('#roomQrLarge'), url);
+  renderedRoomQr = code;
+}
+
+function qrRoomCode(raw) {
+  const value = String(raw || '').trim();
+  if (/^[A-Z2-9]{5}$/i.test(value)) return value.toUpperCase();
+  try {
+    const url = new URL(value);
+    if (url.origin !== location.origin || url.pathname !== location.pathname) return null;
+    const code = url.searchParams.get('room')?.toUpperCase();
+    return /^[A-Z2-9]{5}$/.test(code || '') ? code : null;
+  } catch { return null; }
+}
+
+function stopQrScanner() {
+  scannerActive = false;
+  clearTimeout(scannerTimer);
+  scannerTimer = null;
+  scannerStream?.getTracks().forEach(track => track.stop());
+  scannerStream = null;
+  $('#scannerVideo').srcObject = null;
+  $('#scannerVideo').hidden = true;
+  $('#qrScanner').hidden = true;
+}
+
+async function scanQrFrame() {
+  if (!scannerActive) return;
+  try {
+    const video = $('#scannerVideo');
+    if (video.readyState >= 2) {
+      const results = await scannerDetector.detect(video);
+      if (!scannerActive) return;
+      for (const result of results) {
+        const code = qrRoomCode(result.rawValue);
+        if (!code) { $('#scannerStatus').textContent = 'QR นี้ไม่ใช่ห้อง Turbo Trail'; continue; }
+        stopQrScanner();
+        setOnlineSelection(true);
+        $('#roomCode').value = code;
+        $('#inviteNotice').hidden = false;
+        $('#inviteNotice').textContent = `พบห้อง ${code} · กำลังเข้าห้อง…`;
+        prepareStudentName();
+        connectRoom('join');
+        return;
+      }
+    }
+  } catch { $('#scannerStatus').textContent = 'อ่าน QR ไม่สำเร็จ ลองขยับกล้องให้เห็นภาพชัดขึ้น'; }
+  if (scannerActive) scannerTimer = setTimeout(scanQrFrame, 220);
+}
+
+async function openQrScanner() {
+  $('#qrScanner').hidden = false;
+  $('#scannerVideo').hidden = true;
+  $('#scannerStatus').textContent = 'กำลังเปิดกล้อง…';
+  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) {
+    $('#scannerStatus').textContent = 'เบราว์เซอร์นี้สแกนในเกมไม่ได้ ใช้แอปกล้องมือถือสแกน QR ของครู หรือกรอกรหัสห้อง';
+    return;
+  }
+  try {
+    const formats = await BarcodeDetector.getSupportedFormats();
+    if (!formats.includes('qr_code')) throw new Error('ไม่รองรับ QR');
+    if ($('#qrScanner').hidden) return;
+    scannerDetector = new BarcodeDetector({ formats: ['qr_code'] });
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    if ($('#qrScanner').hidden) { stopQrScanner(); return; }
+    const video = $('#scannerVideo');
+    video.srcObject = scannerStream;
+    video.hidden = false;
+    await video.play();
+    scannerActive = true;
+    $('#scannerStatus').textContent = 'เล็งกล้องไปที่ QR บนหน้าจอของครู';
+    scanQrFrame();
+  } catch {
+    stopQrScanner();
+    $('#qrScanner').hidden = false;
+    $('#scannerStatus').textContent = 'เปิดกล้องไม่ได้ ใช้แอปกล้องมือถือสแกน QR ของครู หรือกรอกรหัสห้อง';
+  }
+}
+
+function prepareStudentName() {
+  const field = $('#playerName');
+  if (field.value.trim() && field.value.trim() !== 'Rider') return;
+  const suffix = typeof crypto.randomUUID === 'function' ? crypto.randomUUID().slice(0, 6) :
+    Math.random().toString(36).slice(2, 8);
+  field.value = `นักเรียน-${suffix.toUpperCase()}`;
+}
+
 function renderLobby(data) {
   if (!data || !network.room || data.code !== network.room) return;
   connectedPlayers = data.players || [];
   ui.lobbyCode.textContent = data.code;
   ui.lobbyCount.textContent = String(connectedPlayers.length);
   ui.lobbyDetails.textContent = `${TRACKS.find(track => track.id === data.track)?.name || 'สนาม'} · ${data.mode === 'item' ? 'ไอเท็มเรซ' : 'สปีดเรซ'}${data.learning ? ` · โหมดเรียนรู้ ${data.questions?.length || 0} ข้อ` : ''}`;
+  showRoomQr(data.code);
   ui.lobbyPlayers.replaceChildren(...connectedPlayers.map(player => {
     const badge = document.createElement('span');
     badge.className = 'lobby-player';
@@ -861,6 +987,7 @@ function onNetworkMessage(data) {
 
 function onNetworkClose() {
   ui.roomBadge.hidden = true;
+  $('#qrFullscreen').hidden = true;
   if (onlineRace && (game.mode === 'racing' || game.mode === 'countdown')) {
     onlineRace = false;
     toast('ขาดการเชื่อมต่อห้องแข่ง');
@@ -889,8 +1016,13 @@ async function connectRoom(action) {
       learning: learningEnabled, questions: learningEnabled ? questionBank : [],
     });
     renderLobby(data);
+    $('#inviteNotice').hidden = true;
+    try { sessionStorage.setItem('turbo-trail-player-name', $('#playerName').value.trim()); } catch { /* Storage is optional. */ }
     setNetworkStatus(`เชื่อมต่อห้อง ${data.code} แล้ว`);
-  } catch (error) { setNetworkStatus(error.message, true); }
+  } catch (error) {
+    setNetworkStatus(error.message, true);
+    if (!$('#inviteNotice').hidden) $('#inviteNotice').textContent = `เข้าห้องไม่ได้: ${error.message}`;
+  }
   finally { $('#createRoomButton').disabled = $('#joinRoomButton').disabled = false; }
 }
 
@@ -906,6 +1038,7 @@ function resetRace(online = false, startAt = 0) {
   game.countdown = online ? Math.max(0, (startAt - Date.now()) / 1000) : 3;
   ui.menu.hidden = true;
   ui.lobby.hidden = true;
+  $('#qrFullscreen').hidden = true;
   ui.pauseMenu.hidden = true;
   ui.results.hidden = true;
   ui.hud.hidden = false;
@@ -965,11 +1098,14 @@ function finishRace() {
 }
 
 function returnToMenu() {
+  stopQrScanner();
   network.close();
   setNetworkStatus('สร้างห้องหรือใส่รหัสห้องเพื่อแข่งกับเพื่อน สูงสุด 50 คน');
   onlineRace = false;
   connectedPlayers = [];
   ui.lobby.hidden = true;
+  $('#qrFullscreen').hidden = true;
+  renderedRoomQr = '';
   ui.pauseMenu.hidden = true;
   ui.results.hidden = true;
   $('#quizPanel').hidden = true;
@@ -1296,6 +1432,14 @@ function keyToControl(key) {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('#qrFullscreen').hidden) {
+    $('#qrFullscreen').hidden = true;
+    event.preventDefault(); return;
+  }
+  if (event.key === 'Escape' && !$('#qrScanner').hidden) {
+    stopQrScanner();
+    event.preventDefault(); return;
+  }
   if (activeQuiz) {
     if (/^[1-4]$/.test(event.key)) answerQuiz(Number(event.key) - 1);
     else if (event.key === 'Escape') answerQuiz(null);
@@ -1325,6 +1469,7 @@ window.addEventListener('blur', () => {
   if (game.mode === 'racing' && !onlineRace) pauseRace();
 });
 document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !$('#qrScanner').hidden) stopQrScanner();
   if (document.hidden && game.mode === 'racing' && !onlineRace) pauseRace();
 });
 document.querySelectorAll('[data-control]').forEach((button) => {
@@ -1502,6 +1647,17 @@ document.querySelectorAll('[data-race-mode]').forEach(button => button.addEventL
 }));
 $('#soloTab').addEventListener('click', () => setOnlineSelection(false));
 $('#onlineTab').addEventListener('click', () => setOnlineSelection(true));
+$('#scanQrButton').addEventListener('click', openQrScanner);
+$('#closeQrScanner').addEventListener('click', stopQrScanner);
+$('#expandQrButton').addEventListener('click', () => { $('#qrFullscreen').hidden = false; });
+$('#closeQrFullscreen').addEventListener('click', () => { $('#qrFullscreen').hidden = true; });
+$('#copyInviteButton').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(roomInviteUrl(network.room));
+    $('#copyInviteButton').textContent = 'คัดลอกแล้ว ✓';
+    setTimeout(() => { $('#copyInviteButton').textContent = 'คัดลอกลิงก์'; }, 1800);
+  } catch { $('#copyInviteButton').textContent = 'คัดลอกไม่ได้'; }
+});
 $('#createRoomButton').addEventListener('click', () => connectRoom('create'));
 $('#joinRoomButton').addEventListener('click', () => connectRoom('join'));
 $('#lobbyStart').addEventListener('click', () => network.send({ type: 'start' }));
@@ -1520,9 +1676,22 @@ window.addEventListener('resize', () => {
 });
 
 try {
+  try {
+    const savedName = sessionStorage.getItem('turbo-trail-player-name');
+    if (savedName && savedName !== 'Rider') $('#playerName').value = savedName;
+  } catch { /* Storage is optional. */ }
   renderChoices();
   setup3D();
   frame();
+  const sharedCode = new URLSearchParams(location.search).get('room')?.trim().toUpperCase();
+  if (/^[A-Z2-9]{5}$/.test(sharedCode || '')) {
+    setOnlineSelection(true);
+    $('#roomCode').value = sharedCode;
+    prepareStudentName();
+    $('#inviteNotice').hidden = false;
+    $('#inviteNotice').textContent = `พบห้อง ${sharedCode} · กำลังเข้าห้อง…`;
+    connectRoom('join');
+  }
 } catch (error) {
   console.error(error);
   ui.menu.querySelector('p').textContent =
