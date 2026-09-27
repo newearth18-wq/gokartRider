@@ -817,9 +817,13 @@ function formatTime(seconds) {
 }
 
 function rank() {
-  return 1 + (onlineRace ? connectedPlayers.filter(player =>
-    player.id !== network.id && player.distance > game.distance) :
-    game.ai.filter(opponent => opponent.distance > game.distance)).length;
+  if (onlineRace) {
+    const order = connectedPlayers.map(player => ({
+      id: player.id, distance: player.id === network.id ? game.distance : player.distance,
+    })).sort((a, b) => b.distance - a.distance);
+    return Math.max(1, order.findIndex(player => player.id === network.id) + 1);
+  }
+  return 1 + game.ai.filter(opponent => opponent.distance > game.distance).length;
 }
 
 function updateLeaderboard() {
