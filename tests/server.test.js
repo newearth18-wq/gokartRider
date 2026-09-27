@@ -87,3 +87,34 @@ test('50 riders share a room and the 51st is rejected', { timeout: 30000 }, asyn
     child.kill();
   }
 });
+
+test('host question bank reaches joining riders and rejects malformed exams', { timeout: 10000 }, async () => {
+  const port = await availablePort();
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' }, stdio: 'ignore',
+  });
+  const clients = [];
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/health`); break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 40)); }
+    }
+    const host = await open(`ws://127.0.0.1:${port}/race`); clients.push(host);
+    const invalid = waitMessage(host, data => data.type === 'error');
+    host.send(JSON.stringify({ type: 'create', learning: true, questions: [{ question: 'Incomplete' }] }));
+    assert.match((await invalid).message, /ข้อสอบ/);
+    const questions = [{ question: '2 + 2?', options: ['3', '4', '5', '6'], answer: 1 }];
+    const welcomePromise = waitMessage(host, data => data.type === 'welcome');
+    host.send(JSON.stringify({ type: 'create', learning: true, questions, mode: 'speed' }));
+    const welcome = await welcomePromise;
+    assert.equal(welcome.learning, true);
+    assert.deepEqual(welcome.questions, questions);
+    const rider = await open(`ws://127.0.0.1:${port}/race`); clients.push(rider);
+    const joined = waitMessage(rider, data => data.type === 'welcome');
+    rider.send(JSON.stringify({ type: 'join', code: welcome.code }));
+    assert.deepEqual((await joined).questions, questions);
+  } finally {
+    for (const client of clients) client.close();
+    child.kill();
+  }
+});

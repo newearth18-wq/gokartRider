@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 import { TRACKS, CHARACTERS, MAX_PLAYERS, RACE_LAPS } from './config.js';
 import { RaceConnection } from './network.js';
+import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -24,7 +25,7 @@ const keys = { left: false, right: false, gas: false, drift: false, boost: false
 const pointerControls = new Map();
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const lerp = (a, b, t) => a + (b - a) * t;
-const ROAD_HALF = 9;
+const ROAD_HALF = 12.5;
 const MAX_SPEED = 65;
 const touchLayout = () => matchMedia('(any-pointer: coarse)').matches || window.innerWidth <= 700;
 const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d];
@@ -69,6 +70,18 @@ let remoteKarts = new Map();
 let lastNetworkState = 0;
 let lastItem = -1;
 let heldItem = null;
+let earnedPower = null;
+let learningEnabled = true;
+let questionBank = DEFAULT_QUESTIONS.map(question => ({ ...question, options: [...question.options] }));
+try { questionBank = normalizeQuestions(JSON.parse(localStorage.getItem('turbo-trail-questions') || 'null')); }
+catch { /* Use the starter questions when storage is empty or invalid. */ }
+let raceQuestions = questionBank;
+let activeQuiz = null;
+let nextQuizDistance = 180;
+let quizCursor = 0;
+let quizCorrect = 0;
+let quizAttempted = 0;
+let editingIndex = 0;
 let shieldTime = 0;
 let pulseTime = 0;
 let lastLeaderboardUpdate = 0;
@@ -104,7 +117,7 @@ function box(parent, width, height, depth, material, x, y, z) {
 }
 
 function createCurve() {
-  const points = selectedTrack.points.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+  const points = selectedTrack.points.map(([x, y, z]) => new THREE.Vector3(x * 1.8, y * 1.25, z * 1.8));
   curve = new THREE.CatmullRomCurve3(points, true, 'catmullrom', .5);
   curve.arcLengthDivisions = 1600;
   trackLength = curve.getLength();
@@ -151,10 +164,10 @@ function createRoad() {
 
   const terrain = makeMaterial(selectedTrack.ground, 1);
   terrain.side = THREE.DoubleSide;
-  ribbon(-120, 120, terrain, -.42);
+  ribbon(-155, 155, terrain, -.42);
   const verge = makeMaterial(selectedTrack.verge, 1);
   verge.side = THREE.DoubleSide;
-  ribbon(-14, 14, verge, -.25);
+  ribbon(-17, 17, verge, -.25);
 
   const asphaltCanvas = document.createElement('canvas');
   asphaltCanvas.width = asphaltCanvas.height = 128;
@@ -227,7 +240,7 @@ function createRoad() {
       const a = samples[i], b = samples[i + 1];
       for (const [p, y] of [[a, .35], [a, 1.05], [b, 1.05],
                             [a, .35], [b, 1.05], [b, .35]]) {
-        const v = p.point.clone().addScaledVector(p.right, side * 12);
+        const v = p.point.clone().addScaledVector(p.right, side * 15.5);
         positions.push(v.x, v.y + y, v.z);
       }
     }
@@ -238,7 +251,7 @@ function createRoad() {
     rail.material.side = THREE.DoubleSide;
     for (let i = 0; i < count; i += 17) {
       const p = samples[i];
-      const point = p.point.clone().addScaledVector(p.right, side * 12);
+      const point = p.point.clone().addScaledVector(p.right, side * 15.5);
       const dummy = new THREE.Object3D();
       dummy.position.set(point.x, point.y + .65, point.z);
       dummy.rotation.y = Math.atan2(p.tangent.x, p.tangent.z);
@@ -254,12 +267,12 @@ function createRoad() {
 
   const start = samples[0];
   const marker = makeMaterial(0xffffff, 1);
-  for (let column = 0; column < 12; column++) {
+  for (let column = 0; column < 16; column++) {
     for (let row = 0; row < 2; row++) {
-      const tile = box(scene, 1.5, .025, .9,
+      const tile = box(scene, 1.55, .025, .9,
         (column + row) % 2 ? marker : makeMaterial(0x253444, 1),
         start.point.x, start.point.y + .09, start.point.z);
-      const local = start.right.clone().multiplyScalar(-ROAD_HALF + .75 + column * 1.5)
+      const local = start.right.clone().multiplyScalar(-ROAD_HALF + .78 + column * 1.55)
         .addScaledVector(start.tangent, row * .9);
       tile.position.add(local);
       tile.rotation.y = Math.atan2(start.tangent.x, start.tangent.z);
@@ -291,9 +304,9 @@ function createArch(at) {
   const gantry = new THREE.Group();
   gantry.position.copy(at.point);
   gantry.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
-  box(gantry, .9, 8.3, .9, cobalt, -11, 4.1, 0);
-  box(gantry, .9, 8.3, .9, cobalt, 11, 4.1, 0);
-  box(gantry, 23, 1.6, 1.2, cobalt, 0, 8.2, 0);
+  box(gantry, .9, 8.3, .9, cobalt, -14.5, 4.1, 0);
+  box(gantry, .9, 8.3, .9, cobalt, 14.5, 4.1, 0);
+  box(gantry, 30, 1.6, 1.2, cobalt, 0, 8.2, 0);
   const sign = mesh(new THREE.PlaneGeometry(16, 3.4), signMat, gantry, 0, 8.2, .66);
   sign.material.transparent = false;
   const backSign = mesh(new THREE.PlaneGeometry(16, 3.4), signMat, gantry, 0, 8.2, -.66);
@@ -806,7 +819,7 @@ function renderLobby(data) {
   connectedPlayers = data.players || [];
   ui.lobbyCode.textContent = data.code;
   ui.lobbyCount.textContent = String(connectedPlayers.length);
-  ui.lobbyDetails.textContent = `${TRACKS.find(track => track.id === data.track)?.name || 'สนาม'} · ${data.mode === 'item' ? 'ไอเท็มเรซ' : 'สปีดเรซ'}`;
+  ui.lobbyDetails.textContent = `${TRACKS.find(track => track.id === data.track)?.name || 'สนาม'} · ${data.mode === 'item' ? 'ไอเท็มเรซ' : 'สปีดเรซ'}${data.learning ? ` · โหมดเรียนรู้ ${data.questions?.length || 0} ข้อ` : ''}`;
   ui.lobbyPlayers.replaceChildren(...connectedPlayers.map(player => {
     const badge = document.createElement('span');
     badge.className = 'lobby-player';
@@ -822,6 +835,9 @@ function renderLobby(data) {
   } else if (data.state === 'countdown' && game.mode === 'menu') {
     selectedTrack = TRACKS.find(track => track.id === data.track) || TRACKS[0];
     selectedMode = data.mode;
+    learningEnabled = Boolean(data.learning);
+    $('#learningToggle').checked = learningEnabled;
+    if (learningEnabled) raceQuestions = normalizeQuestions(data.questions);
     buildWorld();
     resetRace(true, data.startAt);
   }
@@ -858,6 +874,8 @@ function onNetworkClose() {
 async function connectRoom(action) {
   const code = $('#roomCode').value.trim().toUpperCase();
   if (action === 'join' && !/^[A-Z2-9]{5}$/.test(code)) return setNetworkStatus('กรอกรหัสห้อง 5 ตัวอักษร', true);
+  if (action === 'create' && learningEnabled && new TextEncoder().encode(JSON.stringify(questionBank)).length > 9000)
+    return setNetworkStatus('ชุดข้อสอบใหญ่เกิน 9 KB โปรดลดข้อความก่อนสร้างห้อง', true);
   setNetworkStatus('กำลังเชื่อมต่อเซิร์ฟเวอร์…');
   $('#createRoomButton').disabled = $('#joinRoomButton').disabled = true;
   try {
@@ -868,6 +886,7 @@ async function connectRoom(action) {
       rim: `#${appearance.rim.toString(16).padStart(6, '0')}`,
       decal: appearance.decal,
       track: selectedTrack.id, mode: selectedMode,
+      learning: learningEnabled, questions: learningEnabled ? questionBank : [],
     });
     renderLobby(data);
     setNetworkStatus(`เชื่อมต่อห้อง ${data.code} แล้ว`);
@@ -878,6 +897,7 @@ async function connectRoom(action) {
 function resetRace(online = false, startAt = 0) {
   game = freshGame();
   onlineRace = online;
+  if (!online) raceQuestions = questionBank;
   if (online) {
     const spawn = connectedPlayers.find(player => player.id === network.id);
     if (spawn) { game.distance = spawn.distance; game.lateral = spawn.lateral; }
@@ -898,6 +918,10 @@ function resetRace(online = false, startAt = 0) {
   pointerControls.clear();
   resetTouchSteering();
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
+  earnedPower = null; activeQuiz = null; nextQuizDistance = 180;
+  quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
+  $('#quizPanel').hidden = true;
+  $('#learningScore').hidden = !learningEnabled;
   lastLeaderboardUpdate = 0;
   opponents.forEach(kart => { kart.visible = !online; });
   while (smoke.length) {
@@ -909,6 +933,7 @@ function resetRace(online = false, startAt = 0) {
 }
 
 function pauseRace() {
+  if (activeQuiz) return;
   if (onlineRace) { toast('การแข่งขันออนไลน์หยุดเวลาไม่ได้'); return; }
   if (game.mode === 'racing' || game.mode === 'countdown') {
     game.wasCounting = game.mode === 'countdown';
@@ -931,7 +956,8 @@ function finishRace() {
   const suffix = place === 1 ? 'st' : place === 2 ? 'nd' : place === 3 ? 'rd' : 'th';
   ui.resultPlace.textContent = String(place) + suffix;
   ui.resultSummary.textContent = 'เวลา ' + formatTime(game.raceTime) + ' · ' +
-    (place === 1 ? 'สุดยอด! คุณเป็นแชมป์สนามนี้' : 'ลองใหม่แล้วแซงให้ได้!');
+    (place === 1 ? 'สุดยอด! คุณเป็นแชมป์สนามนี้' : 'ลองใหม่แล้วแซงให้ได้!') +
+    (learningEnabled ? ` · ตอบถูก ${quizCorrect}/${quizAttempted} ข้อ` : '');
   ui.results.hidden = false;
   ui.touch.hidden = true;
   ui.pause.hidden = true;
@@ -946,11 +972,14 @@ function returnToMenu() {
   ui.lobby.hidden = true;
   ui.pauseMenu.hidden = true;
   ui.results.hidden = true;
+  $('#quizPanel').hidden = true;
+  activeQuiz = null;
   ui.hud.hidden = true;
   ui.touch.hidden = true;
   ui.pause.hidden = true;
   ui.roomBadge.hidden = true;
   ui.menu.hidden = false;
+  learningEnabled = $('#learningToggle').checked;
   buildWorld();
   renderChoices();
 }
@@ -959,6 +988,48 @@ function toast(message, duration = 1.4) {
   ui.toast.textContent = message;
   ui.toast.hidden = false;
   toastUntil = performance.now() + duration * 1000;
+}
+
+function showQuiz() {
+  if (!learningEnabled || !raceQuestions.length || activeQuiz || game.mode !== 'racing') return;
+  const index = quizCursor % raceQuestions.length;
+  const question = raceQuestions[index];
+  activeQuiz = { index, deadline: performance.now() + 20000 };
+  if (!onlineRace) {
+    game.mode = 'quiz';
+    Object.keys(keys).forEach(key => { keys[key] = false; });
+    resetTouchSteering();
+  }
+  $('#quizQuestion').textContent = question.question;
+  $('#quizOptions').replaceChildren(...question.options.map((option, choice) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `${'กขคง'[choice]}. ${option}`;
+    button.addEventListener('click', () => answerQuiz(choice));
+    return button;
+  }));
+  $('#quizTimer').textContent = onlineRace ? '20 วินาที' : 'หยุดเวลาแข่งชั่วคราว';
+  $('#quizPanel').hidden = false;
+  $('#quizOptions button')?.focus();
+}
+
+function answerQuiz(choice) {
+  if (!activeQuiz) return;
+  const question = raceQuestions[activeQuiz.index];
+  if (choice !== null) {
+    quizAttempted++;
+    if (choice === question.answer) {
+      quizCorrect++;
+      earnedPower = ['nitro', 'shield', 'pulse'][(quizCorrect - 1) % 3];
+      toast('ถูกต้อง! ได้พลังพิเศษ กด BOOST เพื่อใช้ ✨', 2.4);
+    } else toast(`ยังไม่ถูก · คำตอบคือ ${question.options[question.answer]}`, 2.4);
+  } else toast('ข้ามคำถามแล้ว', 1.2);
+  quizCursor++;
+  nextQuizDistance = Math.max(nextQuizDistance + 300, game.distance + 240);
+  activeQuiz = null;
+  $('#quizPanel').hidden = true;
+  if (game.mode === 'quiz') game.mode = 'racing';
+  updateHud();
 }
 
 function formatTime(seconds) {
@@ -1011,17 +1082,20 @@ function updateHud() {
   ui.speed.textContent = String(Math.round(game.speed * 3.6));
   ui.charge.textContent = String(Math.floor(game.driftCharge)) + '%';
   ui.chargeFill.style.width = String(game.driftCharge) + '%';
-  const ready = game.driftCharge >= 55;
-  ui.boostHint.textContent = heldItem ? `ไอเท็ม: ${heldItem === 'nitro' ? 'ไนโตร' : heldItem === 'shield' ? 'โล่' : 'คลื่นพลัง'} · กด BOOST` :
+  $('#quizScore').textContent = `${quizCorrect}/${quizAttempted}`;
+  const ready = game.driftCharge >= 55 || Boolean(earnedPower || heldItem);
+  const power = earnedPower || heldItem;
+  ui.boostHint.textContent = power ? `${earnedPower ? 'พลังจากคำตอบ' : 'ไอเท็ม'}: ${power === 'nitro' ? 'ไนโตร' : power === 'shield' ? 'โล่' : 'คลื่นพลัง'} · กด BOOST` :
     game.boostTime > 0 ? 'TURBO ACTIVE!' :
     ready ? 'บูสต์พร้อมแล้ว!' : 'ดริฟต์เพื่อชาร์จบูสต์';
   $('.boost-button').classList.toggle('ready', ready);
 }
 
 function useBoost() {
-  if (selectedMode === 'item' && heldItem && game.mode === 'racing') {
-    const item = heldItem;
-    heldItem = null;
+  if ((earnedPower || (selectedMode === 'item' && heldItem)) && game.mode === 'racing') {
+    const item = earnedPower || heldItem;
+    if (earnedPower) earnedPower = null;
+    else heldItem = null;
     if (item === 'nitro') { game.boostTime = 3.5; toast('ไนโตรแรงเต็มพิกัด! 🔥'); }
     else if (item === 'shield') { shieldTime = 7; toast('โล่ป้องกันพร้อม! 🛡️'); }
     else {
@@ -1029,7 +1103,7 @@ function useBoost() {
       if (!onlineRace) game.ai.forEach(ai => { if (ai.distance > game.distance && ai.distance - game.distance < 90) ai.speed *= .72; });
       toast('ปล่อยคลื่นพลัง! ⚡');
     }
-    if (onlineRace) network.send({ type: 'item', item });
+    if (onlineRace && (selectedMode === 'item' || learningEnabled)) network.send({ type: 'item', item });
     updateHud();
     return;
   }
@@ -1041,6 +1115,11 @@ function useBoost() {
 
 function update(dt) {
   if (performance.now() > toastUntil) ui.toast.hidden = true;
+  if (activeQuiz && onlineRace) {
+    const remaining = Math.max(0, Math.ceil((activeQuiz.deadline - performance.now()) / 1000));
+    $('#quizTimer').textContent = `${remaining} วินาที`;
+    if (!remaining) answerQuiz(null);
+  }
   if (game.mode === 'countdown') {
     game.countdown -= dt;
     const count = Math.min(3, Math.ceil(game.countdown));
@@ -1068,7 +1147,7 @@ function update(dt) {
       game.boostTime = Math.max(0, game.boostTime - dt);
       game.speed += 27 * dt;
     }
-    if (Math.abs(game.lateral) > 7.4 && shieldTime <= 0) {
+    if (Math.abs(game.lateral) > ROAD_HALF - 1.6 && shieldTime <= 0) {
       game.speed -= 33 * dt;
       if (!game.offRoadNotified) {
         toast('ออกนอกสนาม!');
@@ -1093,10 +1172,9 @@ function update(dt) {
     if (Math.abs(game.lateral) > ROAD_HALF) {
       game.lateralVelocity += -Math.sign(game.lateral) * dt * 8;
     }
-    game.lateral = clamp(game.lateral, -10.7, 10.7);
+    game.lateral = clamp(game.lateral, -14.2, 14.2);
     if (drifting) game.driftCharge = clamp(game.driftCharge +
       dt * 38 * (.6 + game.speed / MAX_SPEED), 0, 100);
-    if (keys.boost) useBoost();
     for (const opponent of onlineRace ? [] : game.ai) {
       opponent.distance += opponent.speed * dt *
         (1 + Math.sin(game.raceTime * .32 + opponent.phase) * .045);
@@ -1124,6 +1202,8 @@ function update(dt) {
         }
       }
     }
+    if (learningEnabled && game.distance >= nextQuizDistance &&
+        game.distance < trackLength * RACE_LAPS - 90) showQuiz();
     if (onlineRace) {
       lastNetworkState += dt;
       if (lastNetworkState >= .1) {
@@ -1216,14 +1296,26 @@ function keyToControl(key) {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (activeQuiz) {
+    if (/^[1-4]$/.test(event.key)) answerQuiz(Number(event.key) - 1);
+    else if (event.key === 'Escape') answerQuiz(null);
+    if (/^[1-4]$/.test(event.key) || event.key === 'Escape') event.preventDefault();
+    return;
+  }
+  if (!$('#questionEditor').hidden || !ui.menu.hidden || !ui.lobby.hidden) return;
   if (event.key === 'Escape' || event.key.toLowerCase() === 'p') {
     if (!event.repeat) pauseRace();
     event.preventDefault(); return;
   }
   const control = keyToControl(event.key);
-  if (control) { keys[control] = true; event.preventDefault(); }
+  if (control) {
+    keys[control] = true;
+    if (control === 'boost' && !event.repeat) useBoost();
+    event.preventDefault();
+  }
 });
 window.addEventListener('keyup', (event) => {
+  if (!$('#questionEditor').hidden) return;
   const control = keyToControl(event.key);
   if (control) { keys[control] = false; event.preventDefault(); }
 });
@@ -1242,6 +1334,7 @@ document.querySelectorAll('[data-control]').forEach((button) => {
     button.setPointerCapture(event.pointerId);
     pointerControls.set(event.pointerId, control);
     keys[control] = true;
+    if (control === 'boost') useBoost();
     button.classList.add('active');
   });
   const release = (event) => {
@@ -1295,6 +1388,100 @@ $('#characterChoices').addEventListener('click', event => {
   selectedCharacter = CHARACTERS.find(character => character.id === button.dataset.character) || CHARACTERS[0];
   buildWorld(); renderChoices();
 });
+
+let editorDraft = [];
+function editorStatus(message, error = false) {
+  $('#editorStatus').textContent = message;
+  $('#editorStatus').classList.toggle('error', error);
+}
+function collectEditor() {
+  if (!editorDraft.length) return;
+  editorDraft[editingIndex] = {
+    question: $('#questionText').value,
+    options: [...document.querySelectorAll('.question-option')].map(input => input.value),
+    answer: Number($('#correctAnswer').value),
+  };
+}
+function renderEditor() {
+  $('#questionSelect').replaceChildren(...editorDraft.map((item, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = `${index + 1}. ${(item.question || 'ข้อใหม่').slice(0, 36)}`;
+    return option;
+  }));
+  $('#questionSelect').value = String(editingIndex);
+  const item = editorDraft[editingIndex];
+  $('#questionText').value = item.question;
+  document.querySelectorAll('.question-option').forEach((input, index) => { input.value = item.options[index] || ''; });
+  $('#correctAnswer').value = String(item.answer);
+  $('#addQuestion').disabled = editorDraft.length >= MAX_QUESTIONS;
+  $('#deleteQuestion').disabled = editorDraft.length <= 1;
+}
+function openEditor() {
+  editorDraft = questionBank.map(item => ({ ...item, options: [...item.options] }));
+  editingIndex = 0;
+  renderEditor();
+  editorStatus(`มีข้อสอบ ${editorDraft.length} ข้อ · บันทึกไว้ในเบราว์เซอร์เครื่องนี้`);
+  $('#questionEditor').hidden = false;
+}
+$('#editQuestionsButton').addEventListener('click', openEditor);
+$('#closeEditor').addEventListener('click', () => { $('#questionEditor').hidden = true; });
+$('#questionSelect').addEventListener('change', event => {
+  collectEditor();
+  editingIndex = Number(event.target.value);
+  renderEditor();
+});
+$('#addQuestion').addEventListener('click', () => {
+  collectEditor();
+  if (editorDraft.length >= MAX_QUESTIONS) return;
+  editorDraft.push({ question: '', options: ['', '', '', ''], answer: 0 });
+  editingIndex = editorDraft.length - 1;
+  renderEditor();
+  $('#questionText').focus();
+});
+$('#deleteQuestion').addEventListener('click', () => {
+  if (editorDraft.length <= 1) return;
+  editorDraft.splice(editingIndex, 1);
+  editingIndex = Math.min(editingIndex, editorDraft.length - 1);
+  renderEditor();
+});
+$('#saveQuestions').addEventListener('click', () => {
+  collectEditor();
+  try {
+    questionBank = normalizeQuestions(editorDraft);
+    localStorage.setItem('turbo-trail-questions', JSON.stringify(questionBank));
+    editorStatus(`บันทึกแล้ว ${questionBank.length} ข้อ · ใช้ในการแข่งครั้งถัดไป`);
+    renderEditor();
+  } catch (error) { editorStatus(error.message, true); }
+});
+$('#exportQuestions').addEventListener('click', () => {
+  collectEditor();
+  try {
+    const questions = normalizeQuestions(editorDraft);
+    const blob = new Blob([JSON.stringify(questions, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'turbo-trail-questions.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    editorStatus(`ส่งออกข้อสอบ ${questions.length} ข้อแล้ว`);
+  } catch (error) { editorStatus(error.message, true); }
+});
+$('#importQuestions').addEventListener('click', () => $('#questionFile').click());
+$('#questionFile').addEventListener('change', async event => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    if (file.size > 15000) throw new Error('ไฟล์ข้อสอบใหญ่เกิน 15 KB');
+    editorDraft = normalizeQuestions(JSON.parse(await file.text()));
+    editingIndex = 0;
+    renderEditor();
+    editorStatus(`นำเข้า ${editorDraft.length} ข้อแล้ว · กดบันทึกข้อสอบเพื่อใช้งาน`);
+  } catch (error) { editorStatus(error.message, true); }
+  event.target.value = '';
+});
+$('#learningToggle').addEventListener('change', event => { learningEnabled = event.target.checked; });
+$('#skipQuestion').addEventListener('click', () => answerQuiz(null));
 $('#garage').addEventListener('click', event => {
   const swatch = event.target.closest('[data-part][data-color]');
   const decal = event.target.closest('[data-decal]');

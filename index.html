@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#10142e" />
-    <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ต 3D หลายสนาม เล่นเดี่ยวหรือออนไลน์ได้สูงสุด 50 คนต่อห้อง" />
-    <title>Turbo Trail — เกมแข่งโกคาร์ตออนไลน์</title>
-    <link rel="stylesheet" href="style.css?v=3-0" />
+    <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
+    <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
+    <link rel="stylesheet" href="style.css?v=4-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -29,6 +29,7 @@
           <div class="meter"><div id="chargeFill"></div></div>
           <div class="meter-hint" id="boostHint">ดริฟต์เพื่อชาร์จบูสต์</div>
         </div>
+        <div id="learningScore" class="learning-score" hidden>📘 ตอบถูก <strong id="quizScore">0/0</strong></div>
         <canvas id="minimap" width="150" height="150" aria-label="แผนที่สนาม"></canvas>
       </section>
 
@@ -36,7 +37,7 @@
         <div class="menu-card">
           <div class="eyebrow">ORIGINAL CARTOON KART RACING</div>
           <h1 id="menuTitle">TURBO <em>TRAIL</em></h1>
-          <p>เลือกนักขับ เลือกสนาม แล้วออกซิ่งไปพร้อมกัน</p>
+          <p>เลือกนักขับ เลือกสนาม ตอบคำถามรับพลัง แล้วออกซิ่งไปพร้อมกัน</p>
           <div class="mode-tabs" role="group" aria-label="รูปแบบการเล่น">
             <button id="soloTab" class="mode-tab active" type="button">🏁 เล่นคนเดียว</button>
             <button id="onlineTab" class="mode-tab" type="button">🌐 แข่งออนไลน์</button>
@@ -58,6 +59,7 @@
             <button class="race-mode active" data-race-mode="speed" type="button">⚡ สปีดเรซ</button>
             <button class="race-mode" data-race-mode="item" type="button">🎁 ไอเท็มเรซ</button>
           </div>
+          <div class="learning-menu"><label><input id="learningToggle" type="checkbox" checked /> 📘 โหมดเรียนรู้ · ตอบคำถามรับพลังพิเศษ</label><button id="editQuestionsButton" type="button">จัดการข้อสอบ</button></div>
           <div id="soloActions"><button id="startButton" class="primary-button" type="button">เริ่มแข่งขัน <span>→</span></button></div>
           <div id="onlineActions" hidden>
             <label class="name-label" for="playerName">ชื่อผู้เล่น</label>
@@ -67,6 +69,24 @@
           </div>
           <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · ↑ / W เร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ลากแป้นเลี้ยวด้านซ้าย · กด DRIFT เข้าโค้ง · หมุนจอแนวนอนเพื่อมุมมองกว้าง</span></div>
         </div>
+      </section>
+
+      <section id="questionEditor" class="overlay" aria-labelledby="editorTitle" hidden>
+        <div class="modal-card editor-card"><div class="eyebrow">LEARNING GARAGE</div><h2 id="editorTitle">จัดการข้อสอบ</h2><p>แก้ข้อสอบบนเครื่องนี้ หรือส่งออกไฟล์ JSON ให้ผู้สอนคนอื่นนำเข้า</p>
+          <div class="editor-toolbar"><select id="questionSelect" aria-label="เลือกข้อสอบ"></select><button id="addQuestion" type="button">+ เพิ่มข้อ</button><button id="deleteQuestion" type="button">ลบข้อ</button></div>
+          <label class="editor-field">คำถาม<input id="questionText" maxlength="120" placeholder="พิมพ์คำถาม" /></label>
+          <div class="option-grid"><label class="editor-field">ตัวเลือก ก<input class="question-option" maxlength="80" /></label><label class="editor-field">ตัวเลือก ข<input class="question-option" maxlength="80" /></label><label class="editor-field">ตัวเลือก ค<input class="question-option" maxlength="80" /></label><label class="editor-field">ตัวเลือก ง<input class="question-option" maxlength="80" /></label></div>
+          <label class="editor-field">คำตอบที่ถูก<select id="correctAnswer"><option value="0">ก</option><option value="1">ข</option><option value="2">ค</option><option value="3">ง</option></select></label>
+          <p id="editorStatus" class="editor-status" role="status"></p>
+          <div class="editor-actions"><button id="saveQuestions" class="primary-button" type="button">บันทึกข้อสอบ</button><button id="exportQuestions" type="button">ส่งออก JSON</button><button id="importQuestions" type="button">นำเข้า JSON</button><input id="questionFile" type="file" accept="application/json,.json" hidden /></div>
+          <button id="closeEditor" class="text-button" type="button">กลับไปเลือกสนาม</button>
+        </div>
+      </section>
+
+      <section id="quizPanel" class="quiz-panel" aria-labelledby="quizQuestion" hidden>
+        <div class="quiz-top"><span>📘 ตอบถูกเพื่อรับพลังพิเศษ</span><span id="quizTimer"></span></div>
+        <h2 id="quizQuestion"></h2><div id="quizOptions" class="quiz-options"></div>
+        <button id="skipQuestion" type="button">ข้ามข้อนี้</button>
       </section>
 
       <section id="lobby" class="overlay" aria-labelledby="lobbyTitle" hidden>
@@ -89,6 +109,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=3-2"></script>
+    <script type="module" src="game.js?v=4-0"></script>
   </body>
 </html>

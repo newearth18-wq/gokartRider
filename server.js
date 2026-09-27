@@ -11,7 +11,7 @@ const MAX_PLAYERS = 50;
 const VALID_TRACKS = new Set(['meadow', 'canyon', 'snow', 'harbor']);
 const VALID_CHARACTERS = new Set(['nova', 'poppy', 'riko', 'momo', 'luna', 'mint']);
 const ROOT = __dirname;
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const rooms = new Map();
 let nextPlayer = 1;
 
@@ -40,8 +40,23 @@ function publicPlayers(room) {
 
 function roomStatus(room) {
   return { type: 'room', code: room.code, track: room.track, mode: room.mode,
+    learning: room.learning, questions: room.learning ? room.questions : [],
     state: room.state, hostId: room.hostId, maxPlayers: MAX_PLAYERS,
     startAt: room.startAt, players: publicPlayers(room) };
+}
+
+function cleanQuestions(input) {
+  if (!Array.isArray(input) || input.length < 1 || input.length > 20 ||
+      Buffer.byteLength(JSON.stringify(input)) > 9000) return null;
+  const questions = [];
+  for (const item of input) {
+    if (typeof item?.question !== 'string' || !item.question.trim() || item.question.length > 120 ||
+        !Array.isArray(item.options) || item.options.length !== 4 ||
+        item.options.some(option => typeof option !== 'string' || !option.trim() || option.length > 80) ||
+        !Number.isInteger(item.answer) || item.answer < 0 || item.answer > 3) return null;
+    questions.push({ question: item.question.trim(), options: item.options.map(option => option.trim()), answer: item.answer });
+  }
+  return questions;
 }
 
 function newCode() {
@@ -71,8 +86,11 @@ function join(client, message) {
   if (room && room.state !== 'lobby') return send(client, { type: 'error', message: 'การแข่งขันเริ่มไปแล้ว' });
   if (room && room.players.size >= MAX_PLAYERS) return send(client, { type: 'error', message: 'ห้องเต็ม 50 คนแล้ว' });
   if (creating) {
+    const questions = message.learning ? cleanQuestions(message.questions) : [];
+    if (message.learning && !questions) return send(client, { type: 'error', message: 'ชุดข้อสอบไม่ถูกต้องหรือใหญ่เกิน 9 KB' });
     room = { code, track: VALID_TRACKS.has(message.track) ? message.track : 'meadow',
       mode: message.mode === 'item' ? 'item' : 'speed', state: 'lobby',
+      learning: Boolean(message.learning), questions,
       hostId: client.id, players: new Map(), startAt: 0, createdAt: Date.now() };
     rooms.set(code, room);
   }
@@ -113,13 +131,13 @@ function handleMessage(client, message) {
     // A loose sanity bound blocks arbitrary leaderboard jumps without impacting boosts.
     const maxDistance = elapsed * 100 + 60;
     client.distance = Math.min(Math.max(client.distance - 2, distance), maxDistance);
-    client.lateral = Math.max(-11, Math.min(11, lateral));
+    client.lateral = Math.max(-15, Math.min(15, lateral));
     client.speed = Math.max(0, Math.min(90, speed));
     client.boost = Boolean(message.boost);
     client.shield = Boolean(message.shield);
     return;
   }
-  if (message.type === 'item' && room.mode === 'item' && room.state === 'racing') {
+  if (message.type === 'item' && (room.mode === 'item' || room.learning) && room.state === 'racing') {
     if (!['pulse', 'shield', 'nitro'].includes(message.item)) return;
     if (Date.now() - (client.lastItemAt || 0) < 4000) return;
     client.lastItemAt = Date.now();
@@ -173,7 +191,7 @@ const server = http.createServer((request, response) => {
   try { pathname = decodeURIComponent(url.pathname); } catch { response.writeHead(400); return response.end(); }
   if (pathname === '/') pathname = '/index.html';
   const file = path.resolve(ROOT, '.' + pathname);
-  if (!file.startsWith(ROOT + path.sep) || !['.html', '.js', '.css', '.json', '.svg', '.png'].includes(path.extname(file))) {
+  if (!file.startsWith(ROOT + path.sep) || !['.html', '.js', '.mjs', '.css', '.json', '.svg', '.png'].includes(path.extname(file))) {
     response.writeHead(404); return response.end('Not found');
   }
   fs.createReadStream(file).on('error', () => { if (!response.headersSent) response.writeHead(404); response.end('Not found'); })
