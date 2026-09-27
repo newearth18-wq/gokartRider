@@ -1052,11 +1052,6 @@ window.addEventListener('keydown', (event) => {
     if (!event.repeat) pauseRace();
     event.preventDefault(); return;
   }
-  if (event.key === 'Enter' && game.mode === 'menu') {
-    if (!onlineSelected && !(event.target instanceof HTMLInputElement)) {
-      resetRace(false); event.preventDefault(); return;
-    }
-  }
   const control = keyToControl(event.key);
   if (control) { keys[control] = true; event.preventDefault(); }
 });

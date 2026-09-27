@@ -20,7 +20,7 @@ export class RaceConnection {
       let settled = false;
       const timer = setTimeout(() => {
         if (!settled) { settled = true; ws.close(); reject(new Error('เซิร์ฟเวอร์ยังไม่ตอบสนอง ลองอีกครั้ง')); }
-      }, 20000);
+      }, 45000);
       ws.addEventListener('open', () => ws.send(JSON.stringify({ type: action, ...options })));
       ws.addEventListener('message', event => {
         let data;
