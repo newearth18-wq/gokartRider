@@ -708,10 +708,12 @@ function updateCamera(at, dt) {
   if (game.mode === 'menu') {
     const desired = at.point.clone().addScaledVector(at.tangent, 7)
       .addScaledVector(at.right, 6).add(new THREE.Vector3(0, 4.6, 0));
-    const target = at.point.clone().addScaledVector(at.right, 2)
+    const target = at.point.clone().addScaledVector(at.right, 3)
       .add(new THREE.Vector3(0, 1.65, 0));
-    camera.position.lerp(desired, Math.min(1, dt * 4));
+    if (!game.cameraReady) { camera.position.copy(desired); game.cameraReady = true; }
+    else camera.position.lerp(desired, Math.min(1, dt * 4));
     camera.lookAt(target);
+    if (camera.fov !== 66) { camera.fov = 66; camera.updateProjectionMatrix(); }
     return;
   }
   const behind = at.tangent.clone().multiplyScalar(-12.8);
