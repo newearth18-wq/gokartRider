@@ -1,0 +1,11 @@
+{
+  "name": "turbo-trail",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Original cartoon 3D kart racer with 50-player WebSocket rooms",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/server.test.js"
+  },
+  "engines": { "node": ">=20" }
+}

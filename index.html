@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#10142e" />
-    <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเล่นได้บนมือถือ แท็บเล็ต และคอม" />
-    <title>Turbo Trail — เกมแข่งโกคาร์ต</title>
-    <link rel="stylesheet" href="style.css?v=3d2" />
+    <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ต 3D หลายสนาม เล่นเดี่ยวหรือออนไลน์ได้สูงสุด 50 คนต่อห้อง" />
+    <title>Turbo Trail — เกมแข่งโกคาร์ตออนไลน์</title>
+    <link rel="stylesheet" href="style.css?v=2-3" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -14,7 +14,7 @@
       <div class="vignette" aria-hidden="true"></div>
 
       <header class="topbar">
-        <div class="brand"><span class="brand-mark">✦</span> TURBO<span>TRAIL</span></div>
+        <div class="brand"><span class="brand-mark">✦</span> TURBO<span>TRAIL</span><small id="roomBadge" hidden></small></div>
         <button id="pauseButton" class="icon-button" type="button" aria-label="หยุดเกมชั่วคราว" hidden>Ⅱ</button>
       </header>
 
@@ -22,6 +22,7 @@
         <div class="hud-card position-card"><span class="hud-label">อันดับ</span><strong id="position">1<span>/ 6</span></strong></div>
         <div class="hud-card lap-card"><span class="hud-label">รอบ</span><strong id="lap">1<span>/ 3</span></strong></div>
         <div class="hud-card time-card"><span class="hud-label">เวลา</span><strong id="time">00:00.0</strong></div>
+        <ol id="leaderboard" class="leaderboard" aria-label="อันดับนักแข่ง"></ol>
         <div class="speed-card"><strong id="speed">0</strong><span>KM/H</span></div>
         <div class="meter-card">
           <div class="meter-title"><span>DRIFT CHARGE</span><span id="chargeValue">0%</span></div>
@@ -33,13 +34,35 @@
 
       <section id="menu" class="overlay" aria-labelledby="menuTitle">
         <div class="menu-card">
-          <div class="eyebrow">ARCADE KART RACING</div>
-          <h1 id="menuTitle">TURBO<br /><em>TRAIL</em></h1>
-          <p>ดริฟต์เข้าโค้ง เก็บพลังบูสต์ และแซงคู่แข่งให้ได้ก่อนครบ 3 รอบ</p>
-          <div class="feature-row"><span>✦ สนาม 3D แบบอาร์เคด</span><span>✦ คู่แข่ง 5 คัน</span><span>✦ เล่นได้ทุกจอ</span></div>
-          <button id="startButton" class="primary-button" type="button">เริ่มแข่งขัน <span>→</span></button>
-          <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · ↑ / W เร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ใช้ปุ่มสัมผัสด้านล่าง</span></div>
+          <div class="eyebrow">ORIGINAL CARTOON KART RACING</div>
+          <h1 id="menuTitle">TURBO <em>TRAIL</em></h1>
+          <p>เลือกนักขับ เลือกสนาม แล้วออกซิ่งไปพร้อมกัน</p>
+          <div class="mode-tabs" role="group" aria-label="รูปแบบการเล่น">
+            <button id="soloTab" class="mode-tab active" type="button">🏁 เล่นคนเดียว</button>
+            <button id="onlineTab" class="mode-tab" type="button">🌐 แข่งออนไลน์</button>
+          </div>
+          <div class="selection-title"><strong>นักขับ</strong><span id="characterCaption">โนวา · นักซิ่งดาวรุ่ง</span></div>
+          <div id="characterChoices" class="character-choices" role="group" aria-label="เลือกนักขับ"></div>
+          <div class="selection-title"><strong>สนามแข่ง</strong><span id="trackCaption">สวนสายรุ้ง</span></div>
+          <div id="trackChoices" class="track-choices" role="group" aria-label="เลือกสนาม"></div>
+          <div class="selection-title"><strong>โหมดแข่ง</strong></div>
+          <div class="race-modes" role="group" aria-label="เลือกโหมดแข่ง">
+            <button class="race-mode active" data-race-mode="speed" type="button">⚡ สปีดเรซ</button>
+            <button class="race-mode" data-race-mode="item" type="button">🎁 ไอเท็มเรซ</button>
+          </div>
+          <div id="soloActions"><button id="startButton" class="primary-button" type="button">เริ่มแข่งขัน <span>→</span></button></div>
+          <div id="onlineActions" hidden>
+            <label class="name-label" for="playerName">ชื่อผู้เล่น</label>
+            <input id="playerName" maxlength="18" autocomplete="nickname" value="Rider" />
+            <div class="room-actions"><button id="createRoomButton" class="primary-button" type="button">สร้างห้อง 50 คน <span>→</span></button><div class="join-room"><input id="roomCode" maxlength="5" placeholder="รหัสห้อง" aria-label="รหัสห้อง" /><button id="joinRoomButton" type="button">เข้าห้อง</button></div></div>
+            <p id="networkStatus" class="network-status" role="status">กำลังตรวจเซิร์ฟเวอร์…</p>
+          </div>
+          <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · ↑ / W เร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ใช้ปุ่มสัมผัสด้านล่าง · หมุนจอแนวนอนเพื่อมุมมองกว้าง</span></div>
         </div>
+      </section>
+
+      <section id="lobby" class="overlay" aria-labelledby="lobbyTitle" hidden>
+        <div class="modal-card lobby-card"><div class="eyebrow">LIVE RACE ROOM</div><h2 id="lobbyTitle">ห้อง <span id="lobbyCode"></span></h2><p id="lobbyDetails"></p><div class="lobby-count"><strong id="lobbyCount">1</strong><span>/ 50 คน</span></div><div id="lobbyPlayers" class="lobby-players"></div><button id="lobbyStart" class="primary-button" type="button">เริ่มแข่ง <span>→</span></button><button id="lobbyLeave" class="text-button" type="button">ออกจากห้อง</button><p class="lobby-hint">ส่งรหัสห้องให้เพื่อน แล้วให้เพื่อนกด “เข้าห้อง”</p></div>
       </section>
 
       <section id="pauseMenu" class="overlay" aria-labelledby="pauseTitle" hidden>
@@ -58,6 +81,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=3d2"></script>
+    <script type="module" src="game.js?v=2-3"></script>
   </body>
 </html>
