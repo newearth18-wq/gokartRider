@@ -1,10 +1,10 @@
 # Turbo Trail
 
-เกมแข่งโกคาร์ตอาร์เคดในเบราว์เซอร์ ใช้ HTML Canvas, CSS และ JavaScript โดยไม่ต้องติดตั้งแพ็กเกจ ออกแบบให้เล่นได้บนมือถือ แท็บเล็ต และคอม
+เกมแข่งโกคาร์ตอาร์เคด 3D ในเบราว์เซอร์ ใช้ Three.js, CSS และ JavaScript โดยไม่ต้องติดตั้งแพ็กเกจ ออกแบบให้เล่นได้บนมือถือ แท็บเล็ต และคอม
 
 ## เล่นเกม
 
-เปิด `index.html` ในเบราว์เซอร์ หรือเข้า [หน้าเกมบน GitHub Pages](https://newearth18-wq.github.io/gokartRider/) หลังเปิดใช้งาน Pages ของรีโป
+เข้า [หน้าเกมบน GitHub Pages](https://newearth18-wq.github.io/gokartRider/) หรือเปิดไฟล์ผ่านเว็บเซิร์ฟเวอร์ในเครื่อง เช่น `npx serve .` (ES Modules ใช้ไม่ได้เมื่อเปิด `index.html` ตรงจากไฟล์)
 
 ## การควบคุม
 
@@ -19,10 +19,11 @@
 
 - `index.html` — หน้าจอเกมและ HUD
 - `style.css` — การจัดวางสำหรับจอแต่ละขนาด
-- `game.js` — สนาม 3D แบบ pseudo-3D, ฟิสิกส์, AI, ระบบแข่ง และการควบคุม
+- `game.js` — สนาม 3D, รถและตัวละคร, AI, ระบบแข่ง และการควบคุม
+- `vendor/` — Three.js r180 พร้อมใบอนุญาต MIT
 
 เกมนี้เป็นผลงานต้นฉบับที่ได้แรงบันดาลใจจากเกมแข่งโกคาร์ตทั่วไป ไม่มีกราฟิกหรือไฟล์จาก KartRider Rush+
 
 ## เผยแพร่ผ่าน GitHub Pages
 
-รีโปมี GitHub Actions workflow สำหรับเผยแพร่เกม เมื่อเปิด **Settings → Pages → Build and deployment → Source: GitHub Actions** แล้ว push ไปที่ `main` เกมจะเผยแพร่ที่ URL ด้านบน
+รีโปมี GitHub Actions workflow สำหรับเผยแพร่เกม เมื่อ push ไปที่ `main` เกมจะอัปเดตที่ URL ด้านบน
