@@ -34,8 +34,8 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  return [...room.players.values()].map(({ id, name, character, kart, distance, lateral, speed, boost, shield, finishedAt }) =>
-    ({ id, name, character, kart, distance, lateral, speed, boost, shield, finishedAt }));
+  return [...room.players.values()].map(({ id, name, character, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }) =>
+    ({ id, name, character, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }));
 }
 
 function roomStatus(room) {
@@ -79,6 +79,9 @@ function join(client, message) {
   client.name = cleanName(message.name);
   client.character = VALID_CHARACTERS.has(message.character) ? message.character : 'nova';
   client.kart = /^#[0-9a-fA-F]{6}$/.test(message.kart || '') ? message.kart : '#258def';
+  client.helmet = /^#[0-9a-fA-F]{6}$/.test(message.helmet || '') ? message.helmet : '#258def';
+  client.rim = /^#[0-9a-fA-F]{6}$/.test(message.rim || '') ? message.rim : '#e3edf6';
+  client.decal = ['bolt', 'stripe', 'star', 'plain'].includes(message.decal) ? message.decal : 'bolt';
   const slot = room.players.size;
   client.distance = -Math.floor(slot / 4) * 4;
   client.lateral = [-6, -2, 2, 6][slot % 4];

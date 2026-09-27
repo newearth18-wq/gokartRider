@@ -3,6 +3,7 @@ import { TRACKS, CHARACTERS, MAX_PLAYERS, RACE_LAPS } from './config.js';
 import { RaceConnection } from './network.js';
 
 const canvas = document.querySelector('#track');
+const previewCanvas = document.querySelector('#garagePreview');
 const $ = (selector) => document.querySelector(selector);
 const ui = {
   menu: $('#menu'), pauseMenu: $('#pauseMenu'), results: $('#results'),
@@ -25,6 +26,7 @@ const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const ROAD_HALF = 9;
 const MAX_SPEED = 65;
+const touchLayout = () => matchMedia('(any-pointer: coarse)').matches || window.innerWidth <= 700;
 const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d];
 const clock = new THREE.Clock();
 const up = new THREE.Vector3(0, 1, 0);
@@ -34,6 +36,10 @@ let camera;
 let curve;
 let trackLength;
 let playerKart;
+let previewRenderer;
+let previewScene;
+let previewCamera;
+let previewKart;
 let opponents = [];
 let smoke = [];
 let lastSmoke = 0;
@@ -41,6 +47,20 @@ let toastUntil = 0;
 let previousCountdown = '';
 let selectedTrack = TRACKS[0];
 let selectedCharacter = CHARACTERS[0];
+const PAINTS = [0x188bef, 0xf75e6c, 0xffc52f, 0x58d2a0, 0x9a75ed, 0xf8f9ff, 0x1b2947];
+const HELMETS = [0x258def, 0xff72aa, 0xffc33d, 0x51d9aa, 0x9478f5, 0xf7f7f1, 0x25385c];
+const RIMS = [0xe3edf6, 0xffd84b, 0x5deaff, 0xff7aa8, 0xa58bff, 0x34394b];
+const DECALS = [{ id: 'bolt', name: '⚡ สายฟ้า' }, { id: 'stripe', name: '▰ แถบ' }, { id: 'star', name: '★ ดาว' }, { id: 'plain', name: 'เรียบ' }];
+let appearance = { paint: 0x188bef, helmet: 0x258def, rim: 0xe3edf6, decal: 'bolt' };
+try {
+  const saved = JSON.parse(localStorage.getItem('turbo-trail-garage') || '{}');
+  if (PAINTS.includes(saved.paint)) appearance.paint = saved.paint;
+  if (HELMETS.includes(saved.helmet)) appearance.helmet = saved.helmet;
+  if (RIMS.includes(saved.rim)) appearance.rim = saved.rim;
+  if (DECALS.some(item => item.id === saved.decal)) appearance.decal = saved.decal;
+} catch { /* Private browsing can disable storage. */ }
+let touchSteer = 0;
+let steeringPointer = null;
 let selectedMode = 'speed';
 let onlineSelected = false;
 let onlineRace = false;
@@ -58,7 +78,8 @@ let game = freshGame();
 function freshGame() {
   return {
     mode: 'menu', countdown: 3, distance: 0, speed: 0, lateral: 0,
-    steerMomentum: 0, driftCharge: 0, boostTime: 0, raceTime: 0,
+    steerMomentum: 0, heading: 0, lateralVelocity: 0,
+    driftCharge: 0, boostTime: 0, raceTime: 0,
     offRoadNotified: false, cameraReady: false,
     ai: AI_COLORS.map((color, i) => ({
       color, distance: 9 + i * 6, lateral: [-3, 2, .1, -2, 3][i],
@@ -286,7 +307,9 @@ function createScenery() {
   const isHarbor = selectedTrack.decor === 'harbor';
   const vegetationCount = isHarbor ? 65 : isCanyon ? 95 : 175;
   const trunkGeo = new THREE.CylinderGeometry(.26, .38, 2.5, 6);
-  const leafGeo = new THREE.ConeGeometry(isCanyon ? 1.25 : 2.3, isCanyon ? 4 : 5, isSnow ? 12 : 8);
+  const leafGeo = isSnow || isCanyon ?
+    new THREE.ConeGeometry(isCanyon ? 1.25 : 2.3, isCanyon ? 4 : 5, 12) :
+    new THREE.SphereGeometry(2.5, 12, 8);
   const foliage = new THREE.MeshLambertMaterial({ color: selectedTrack.foliage });
   const trunks = new THREE.InstancedMesh(trunkGeo, makeMaterial(isSnow ? 0x71888a : 0x7e624a, 1), vegetationCount);
   const crowns = new THREE.InstancedMesh(leafGeo, foliage, vegetationCount);
@@ -304,6 +327,7 @@ function createScenery() {
     dummy.scale.setScalar(scale);
     dummy.updateMatrix(); trunks.setMatrixAt(i, dummy.matrix);
     dummy.position.y = position.y + scale * (isCanyon ? 4.1 : 5.3);
+    if (!isSnow && !isCanyon) dummy.scale.set(scale * 1.7, scale * 1.3, scale * 1.7);
     dummy.updateMatrix(); crowns.setMatrixAt(i, dummy.matrix);
   }
   trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
@@ -329,6 +353,11 @@ function createScenery() {
     }
     box(home, 1.7, 1.7, .08, makeMaterial(0x79cfe7), -1.3, 3.1, 3.05);
     box(home, 1.7, 1.7, .08, makeMaterial(0x79cfe7), 1.3, 3.1, 3.05);
+    const trim = makeMaterial(isSnow ? 0xd2eaff : 0xfff2d6, .8);
+    box(home, 1.95, .18, .16, trim, -1.3, 4.02, 3.16);
+    box(home, 1.95, .18, .16, trim, 1.3, 4.02, 3.16);
+    box(home, 1.4, 2.35, .12, makeMaterial(0x8e5f65, .8), 0, 1.2, 3.1);
+    box(home, 6.6, .18, .4, trim, 0, .2, 3.1);
     scene.add(home);
   }
 
@@ -408,7 +437,7 @@ function createItemPickups() {
   }
 }
 
-function createKart(color, character = selectedCharacter, lite = false) {
+function createKart(color, character = selectedCharacter, lite = false, look = appearance) {
   const group = new THREE.Group();
   const chassis = new THREE.Group();
   group.add(chassis);
@@ -416,9 +445,9 @@ function createKart(color, character = selectedCharacter, lite = false) {
   const bodyLight = makeMaterial(new THREE.Color(color).lerp(new THREE.Color(0xffffff), .34), .25, .14);
   const dark = makeMaterial(0x172438, .55);
   const rubber = makeMaterial(0x172032, .92);
-  const rim = makeMaterial(0xe3edf6, .25, .55);
+  const rim = makeMaterial(look.rim ?? 0xe3edf6, .25, .55);
   const skin = makeMaterial(0xffd5b3, .75);
-  const helmet = makeMaterial(character.helmet, .24, .06);
+  const helmet = makeMaterial(look.helmet ?? character.helmet, .24, .06);
   const suit = makeMaterial(character.suit, .5);
   const accent = makeMaterial(character.accent, .28);
   const eye = makeMaterial(0x14233b, .13);
@@ -435,53 +464,88 @@ function createKart(color, character = selectedCharacter, lite = false) {
   box(chassis, 1.52, .7, 1.08, dark, 0, 1.20, -.52);
   box(chassis, 2.6, .13, .55, accent, 0, 1.5, -2.02);
   box(chassis, 2.3, .15, .22, accent, 0, 1.53, .78);
+  const wheels = [];
   for (const x of [-1.62, 1.62]) {
     for (const z of [-1.35, 1.42]) {
-      const tire = mesh(new THREE.CylinderGeometry(.58, .58, .47, lite ? 10 : 24), rubber, chassis, x, .61, z);
+      const mount = new THREE.Group();
+      mount.position.set(x, .61, z);
+      chassis.add(mount);
+      const rolling = new THREE.Group();
+      mount.add(rolling);
+      const tire = mesh(new THREE.CylinderGeometry(.58, .58, .47, lite ? 10 : 24), rubber, rolling);
       tire.rotation.z = Math.PI / 2;
-      const hub = mesh(new THREE.CylinderGeometry(.32, .32, .49, lite ? 10 : 20), rim, chassis,
-        x + Math.sign(x) * .02, .61, z);
+      const hub = mesh(new THREE.CylinderGeometry(.32, .32, .49, lite ? 10 : 20), rim, rolling,
+        Math.sign(x) * .02);
       hub.rotation.z = Math.PI / 2;
       if (!lite) {
-        const center = mesh(new THREE.CylinderGeometry(.15, .15, .51, 16), body, chassis,
-          x + Math.sign(x) * .04, .61, z);
+        const center = mesh(new THREE.CylinderGeometry(.15, .15, .51, 16), body, rolling,
+          Math.sign(x) * .04);
         center.rotation.z = Math.PI / 2;
       }
+      wheels.push({ mount, rolling, front: z > 0 });
     }
   }
-  const torso = mesh(new THREE.SphereGeometry(.65, lite ? 10 : 20, 12), suit, chassis, 0, 1.87, -.65);
+  const driver = new THREE.Group();
+  chassis.add(driver);
+  const torso = mesh(new THREE.SphereGeometry(.65, lite ? 10 : 20, 12), suit, driver, 0, 1.87, -.65);
   torso.scale.set(1, .95, .83);
+  const steeringWheel = mesh(new THREE.TorusGeometry(.35, .075, 8, 20), dark, chassis, 0, 1.68, .24);
+  steeringWheel.rotation.x = -.5;
+  box(chassis, .10, .10, .42, dark, 0, 1.58, .16);
+  const chestBadge = mesh(new THREE.SphereGeometry(.19, 12, 8), accent, driver, 0, 1.92, -.07);
+  chestBadge.scale.z = .25;
+  const arms = [];
   for (const x of [-.56, .56]) {
-    const arm = mesh(new THREE.SphereGeometry(.24, 12, 10), suit, chassis, x, 1.82, -.19);
+    const arm = mesh(new THREE.SphereGeometry(.24, 12, 10), suit, driver, x, 1.82, -.19);
     arm.scale.set(.8, 1.35, .8);
-    mesh(new THREE.SphereGeometry(.22, 12, 10), accent, chassis, x * .75, 1.59, .07);
+    arms.push(arm);
+    mesh(new THREE.SphereGeometry(.22, 12, 10), accent, driver, x * .75, 1.59, .07);
   }
-  const head = mesh(new THREE.SphereGeometry(.79, lite ? 12 : 28, lite ? 10 : 20), helmet, chassis, 0, 2.55, -.67);
-  head.scale.set(1.06, .94, 1.01);
-  const face = mesh(new THREE.SphereGeometry(.65, lite ? 12 : 24, lite ? 8 : 16), skin, chassis, 0, 2.43, -.18);
+  const head = new THREE.Group();
+  driver.add(head);
+  const helmetShell = mesh(new THREE.SphereGeometry(.79, lite ? 12 : 28, lite ? 10 : 20), helmet, head, 0, 2.55, -.67);
+  helmetShell.scale.set(1.06, .94, 1.01);
+  const face = mesh(new THREE.SphereGeometry(.65, lite ? 12 : 24, lite ? 8 : 16), skin, head, 0, 2.43, -.18);
   face.scale.set(1.0, .74, .40);
   for (const x of [-.25, .25]) {
-    const e = mesh(new THREE.SphereGeometry(.12, 12, 10), eye, chassis, x, 2.54, .075);
+    const e = mesh(new THREE.SphereGeometry(.12, 12, 10), eye, head, x, 2.54, .075);
     e.scale.set(.83, 1.5, .52);
     if (!lite) {
-      const cheek = mesh(new THREE.SphereGeometry(.10, 10, 8), makeMaterial(0xf69caa, .7), chassis, x * 1.9, 2.3, .06);
+      const cheek = mesh(new THREE.SphereGeometry(.10, 10, 8), makeMaterial(0xf69caa, .7), head, x * 1.9, 2.3, .06);
       cheek.scale.set(1.15, .52, .42);
     }
   }
+  const smile = mesh(new THREE.TorusGeometry(.12, .025, 6, 16, Math.PI), eye, head, 0, 2.22, .072);
+  smile.rotation.z = Math.PI;
   if (character.style === 'bear' || character.style === 'ears' || character.style === 'fox') {
     for (const x of [-.55, .55]) {
       const ear = mesh(character.style === 'fox' ? new THREE.ConeGeometry(.27, .60, 12) :
-        new THREE.SphereGeometry(.27, 12, 10), helmet, chassis, x, 3.18, -.68);
+        new THREE.SphereGeometry(.27, 12, 10), helmet, head, x, 3.18, -.68);
       if (character.style !== 'fox') ear.scale.y = .9;
     }
   } else if (character.style === 'buns') {
-    for (const x of [-.72, .72]) mesh(new THREE.SphereGeometry(.32, 14, 12), helmet, chassis, x, 2.94, -.8);
+    for (const x of [-.72, .72]) mesh(new THREE.SphereGeometry(.32, 14, 12), helmet, head, x, 2.94, -.8);
   } else if (character.style === 'cap') {
-    const brim = mesh(new THREE.SphereGeometry(1, 12, 8), accent, chassis, 0, 2.93, -.12);
+    const brim = mesh(new THREE.SphereGeometry(1, 12, 8), accent, head, 0, 2.93, -.12);
     brim.scale.set(.72, .09, .43);
   } else {
-    const stripe = mesh(new THREE.SphereGeometry(1, 12, 8), accent, chassis, 0, 3.21, -.67);
+    const stripe = mesh(new THREE.SphereGeometry(1, 12, 8), accent, head, 0, 3.21, -.67);
     stripe.scale.set(.12, .08, .69);
+  }
+  if (look.decal !== 'plain') {
+    const badge = new THREE.Group();
+    badge.position.set(0, 1.2, 1.96);
+    chassis.add(badge);
+    const mark = makeMaterial(look.decal === 'star' ? 0xffe65c : 0xfafcff, .28);
+    if (look.decal === 'bolt') {
+      const bolt = mesh(new THREE.BoxGeometry(.23, .055, .60), mark, badge);
+      bolt.rotation.y = -.5;
+    } else if (look.decal === 'stripe') {
+      for (const x of [-.28, .28]) box(badge, .16, .055, .68, mark, x, 0, 0);
+    } else {
+      const star = mesh(new THREE.OctahedronGeometry(.3), mark, badge);
+      star.scale.y = .18;
+    }
   }
   if (!lite) {
     const lamp = new THREE.MeshBasicMaterial({ color: 0xfff3b9 });
@@ -500,7 +564,7 @@ function createKart(color, character = selectedCharacter, lite = false) {
     flame.visible = false;
     flames.push(flame);
   }
-  group.userData = { chassis, flames };
+  group.userData = { chassis, driver, head, arms, wheels, flames, lastDistance: 0, animationTime: 0 };
   scene.add(group);
   return group;
 }
@@ -513,10 +577,32 @@ function setup3D() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.52;
   camera = new THREE.PerspectiveCamera(66, window.innerWidth / window.innerHeight, .15, 640);
+  previewRenderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: true, powerPreference: 'low-power' });
+  previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+  previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  previewScene = new THREE.Scene();
+  previewScene.add(new THREE.HemisphereLight(0xffffff, 0x7c9db7, 3));
+  const previewLight = new THREE.DirectionalLight(0xffffff, 2.2);
+  previewLight.position.set(-3, 9, 7);
+  previewScene.add(previewLight);
+  previewCamera = new THREE.PerspectiveCamera(26, 1, .1, 100);
+  previewCamera.position.set(4.5, 3.7, 7.3);
+  previewCamera.lookAt(0, 1.55, 0);
+  resizePreview();
   buildWorld();
 }
 
+function resizePreview() {
+  if (!previewRenderer) return;
+  const width = Math.max(1, previewCanvas.clientWidth);
+  const height = Math.max(1, previewCanvas.clientHeight);
+  previewRenderer.setSize(width, height, false);
+  previewCamera.aspect = width / height;
+  previewCamera.updateProjectionMatrix();
+}
+
 function buildWorld() {
+  if (previewKart) { previewScene.remove(previewKart); previewKart = null; }
   if (scene) {
     scene.traverse(object => {
       object.geometry?.dispose();
@@ -535,20 +621,41 @@ function buildWorld() {
   createRoad();
   createScenery();
   if (selectedMode === 'item') createItemPickups();
-  playerKart = createKart(selectedCharacter.kart, selectedCharacter);
-  opponents = AI_COLORS.map((color, i) => createKart(color, CHARACTERS[(i + 1) % CHARACTERS.length], true));
+  playerKart = createKart(appearance.paint, selectedCharacter, false, appearance);
+  previewKart = playerKart.clone(true);
+  previewKart.position.set(0, 0, 0);
+  previewKart.rotation.y = -.3;
+  previewScene.add(previewKart);
+  opponents = AI_COLORS.map((color, i) => {
+    const character = CHARACTERS[(i + 1) % CHARACTERS.length];
+    return createKart(color, character, true, { helmet: character.helmet, rim: 0xe3edf6, decal: 'stripe' });
+  });
+  opponents.forEach(kart => { kart.visible = false; });
   remoteKarts.clear();
   smoke = [];
   game = freshGame();
 }
 
-function syncKart(kart, distance, lateral, lean = 0, boost = false) {
+function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0) {
   const at = pose(distance);
   kart.position.copy(at.point).addScaledVector(at.right, lateral);
-  kart.position.y += .16;
-  kart.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
-  kart.userData.chassis.rotation.z = -lean * .10;
-  kart.userData.chassis.rotation.y = lean * .075;
+  const parts = kart.userData;
+  parts.animationTime += dt;
+  const motion = Math.min(1, speed / MAX_SPEED);
+  kart.position.y += .16 + Math.sin(parts.animationTime * (10 + speed * .24)) * .025 * motion;
+  kart.rotation.y = Math.atan2(at.tangent.x, at.tangent.z) - heading;
+  parts.chassis.rotation.z = lerp(parts.chassis.rotation.z, -lean * .19, Math.min(1, dt * 9));
+  parts.chassis.rotation.x = lerp(parts.chassis.rotation.x, -motion * .025 - (boost ? .045 : 0), Math.min(1, dt * 5));
+  parts.chassis.rotation.y = lerp(parts.chassis.rotation.y, lean * (boost ? .09 : .15), Math.min(1, dt * 7));
+  parts.driver.position.y = Math.sin(parts.animationTime * (6 + motion * 5)) * .055 * (motion + .25);
+  parts.driver.rotation.z = lerp(parts.driver.rotation.z, -lean * .16, Math.min(1, dt * 7));
+  parts.head.rotation.z = lerp(parts.head.rotation.z, lean * .14, Math.min(1, dt * 5));
+  parts.head.rotation.x = Math.sin(parts.animationTime * 3) * .025;
+  parts.arms.forEach((arm, i) => { arm.rotation.z = lean * (i ? -.38 : .38); });
+  for (const wheel of parts.wheels) {
+    wheel.rolling.rotation.x += speed * dt / .58;
+    if (wheel.front) wheel.mount.rotation.y = lerp(wheel.mount.rotation.y, -lean * .42, Math.min(1, dt * 12));
+  }
   for (const flame of kart.userData.flames) {
     flame.visible = boost;
     if (boost) flame.scale.y = .7 + Math.random() * .7;
@@ -567,7 +674,9 @@ function syncRemoteKarts(dt) {
     if (!kart) {
       const color = /^#[0-9a-fA-F]{6}$/.test(player.kart || '') ? Number.parseInt(player.kart.slice(1), 16) : 0xff7f61;
       const character = CHARACTERS.find(entry => entry.id === player.character) || CHARACTERS[0];
-      kart = createKart(color, character, true);
+      const helmet = /^#[0-9a-fA-F]{6}$/.test(player.helmet || '') ? Number.parseInt(player.helmet.slice(1), 16) : character.helmet;
+      const rim = /^#[0-9a-fA-F]{6}$/.test(player.rim || '') ? Number.parseInt(player.rim.slice(1), 16) : 0xe3edf6;
+      kart = createKart(color, character, true, { helmet, rim, decal: player.decal || 'bolt' });
       kart.userData.distance = player.distance;
       kart.userData.lateral = player.lateral;
       remoteKarts.set(player.id, kart);
@@ -575,7 +684,7 @@ function syncRemoteKarts(dt) {
     kart.userData.distance = Math.abs(player.distance - kart.userData.distance) > 70 ?
       player.distance : lerp(kart.userData.distance, player.distance, Math.min(1, dt * 9));
     kart.userData.lateral = lerp(kart.userData.lateral, player.lateral, Math.min(1, dt * 9));
-    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost);
+    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt);
   }
   for (const [id, kart] of remoteKarts) {
     if (active.has(id)) continue;
@@ -586,18 +695,31 @@ function syncRemoteKarts(dt) {
 }
 
 function updateCamera(at, dt) {
+  if (game.mode === 'menu') {
+    const desired = at.point.clone().addScaledVector(at.tangent, 7)
+      .addScaledVector(at.right, 6).add(new THREE.Vector3(0, 4.6, 0));
+    const target = at.point.clone().addScaledVector(at.right, 2)
+      .add(new THREE.Vector3(0, 1.65, 0));
+    camera.position.lerp(desired, Math.min(1, dt * 4));
+    camera.lookAt(target);
+    return;
+  }
   const behind = at.tangent.clone().multiplyScalar(-12.8);
   const desired = at.point.clone().add(behind)
-    .addScaledVector(at.right, game.lateral * .45)
-    .add(new THREE.Vector3(0, 6.2, 0));
+    .addScaledVector(at.right, game.lateral - game.lateralVelocity * .08)
+    .add(new THREE.Vector3(0, 5.9 - Math.min(.6, game.speed / MAX_SPEED * .6), 0));
   const target = at.point.clone().addScaledVector(at.tangent, 19)
-    .addScaledVector(at.right, game.mode === 'menu' ? -7 : 0)
+    .addScaledVector(at.right, game.lateral + game.steerMomentum * 2)
     .add(new THREE.Vector3(0, 1.8, 0));
   if (!game.cameraReady) {
     camera.position.copy(desired);
     game.cameraReady = true;
-  } else camera.position.lerp(desired, Math.min(1, dt * 5));
-  camera.lookAt(target);
+  } else camera.position.lerp(desired, 1 - Math.exp(-dt * 4.5));
+  if (!game.cameraTarget) game.cameraTarget = target.clone();
+  game.cameraTarget.lerp(target, 1 - Math.exp(-dt * 6));
+  camera.lookAt(game.cameraTarget);
+  camera.fov = lerp(camera.fov, 65 + game.speed / MAX_SPEED * 5 + (game.boostTime > 0 ? 4 : 0), Math.min(1, dt * 3));
+  camera.updateProjectionMatrix();
 }
 
 function spawnSmoke(at) {
@@ -636,6 +758,17 @@ function renderChoices() {
     `<button type="button" class="track-choice ${track.id === selectedTrack.id ? 'active' : ''}" data-track="${track.id}" aria-pressed="${track.id === selectedTrack.id}"><span class="track-icon">${track.icon}</span><span><strong>${track.name}</strong><small>${track.subtitle}</small></span></button>`).join('');
   $('#characterCaption').textContent = `${selectedCharacter.name} · ${selectedCharacter.title}`;
   $('#trackCaption').textContent = selectedTrack.name;
+  const colorGroups = [
+    ['paint', PAINTS, '#paintChoices', 'สีรถ'],
+    ['helmet', HELMETS, '#helmetChoices', 'สีหมวก'],
+    ['rim', RIMS, '#rimChoices', 'สีล้อ'],
+  ];
+  for (const [part, colors, selector, label] of colorGroups) {
+    $(selector).innerHTML = colors.map((color, index) =>
+      `<button type="button" class="swatch ${appearance[part] === color ? 'active' : ''}" data-part="${part}" data-color="${color}" style="--swatch:#${color.toString(16).padStart(6, '0')}" aria-label="${label}แบบ ${index + 1}" aria-pressed="${appearance[part] === color}"></button>`).join('');
+  }
+  $('#decalChoices').innerHTML = DECALS.map(item =>
+    `<button type="button" class="decal-choice ${appearance.decal === item.id ? 'active' : ''}" data-decal="${item.id}" aria-pressed="${appearance.decal === item.id}">${item.name}</button>`).join('');
   document.querySelectorAll('.race-mode').forEach(button => {
     button.classList.toggle('active', button.dataset.raceMode === selectedMode);
     button.setAttribute('aria-pressed', button.dataset.raceMode === selectedMode);
@@ -718,7 +851,10 @@ async function connectRoom(action) {
   try {
     const data = await network.connect(action, {
       code, name: $('#playerName').value, character: selectedCharacter.id,
-      kart: `#${selectedCharacter.kart.toString(16).padStart(6, '0')}`,
+      kart: `#${appearance.paint.toString(16).padStart(6, '0')}`,
+      helmet: `#${appearance.helmet.toString(16).padStart(6, '0')}`,
+      rim: `#${appearance.rim.toString(16).padStart(6, '0')}`,
+      decal: appearance.decal,
       track: selectedTrack.id, mode: selectedMode,
     });
     renderLobby(data);
@@ -741,13 +877,16 @@ function resetRace(online = false, startAt = 0) {
   ui.pauseMenu.hidden = true;
   ui.results.hidden = true;
   ui.hud.hidden = false;
-  ui.touch.hidden = !matchMedia('(any-pointer: coarse)').matches;
+  ui.touch.hidden = !touchLayout();
   ui.pause.hidden = online;
   ui.countdown.hidden = false;
   ui.toast.hidden = true;
   previousCountdown = '';
   Object.keys(keys).forEach((key) => { keys[key] = false; });
   pointerControls.clear();
+  touchSteer = 0;
+  steeringPointer = null;
+  $('#steeringKnob').style.transform = 'translateX(0px)';
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
   lastLeaderboardUpdate = 0;
   opponents.forEach(kart => { kart.visible = !online; });
@@ -906,8 +1045,8 @@ function update(dt) {
     game.raceTime += dt;
     shieldTime = Math.max(0, shieldTime - dt);
     pulseTime = Math.max(0, pulseTime - dt);
-    const accelerating = keys.gas || matchMedia('(any-pointer: coarse)').matches;
-    const steer = Number(keys.right) - Number(keys.left);
+    const accelerating = keys.gas || touchLayout();
+    const steer = clamp(Number(keys.right) - Number(keys.left) + touchSteer, -1, 1);
     const drifting = keys.drift && Math.abs(steer) > 0 && game.speed > 13;
     const cap = game.boostTime > 0 ? MAX_SPEED * 1.3 : MAX_SPEED;
     game.speed += ((accelerating ? keys.gas ? 27 : 23 : -24) -
@@ -926,14 +1065,22 @@ function update(dt) {
     } else game.offRoadNotified = false;
     game.speed = clamp(game.speed, 0, cap);
     const oldDistance = game.distance;
-    game.distance += game.speed * dt;
-    game.steerMomentum = lerp(game.steerMomentum, steer, Math.min(1, dt * (drifting ? 5.5 : 8)));
-    game.lateral += game.steerMomentum * (drifting ? 7.5 : 5.8) *
-      dt * (.35 + .65 * game.speed / MAX_SPEED);
+    game.distance += game.speed * Math.cos(game.heading) * dt;
+    game.steerMomentum = lerp(game.steerMomentum, steer, 1 - Math.exp(-dt * (drifting ? 7 : 10)));
+    const targetHeading = game.steerMomentum * (drifting ? .26 : .19) *
+      (.48 + .52 * game.speed / MAX_SPEED) - clamp(game.lateral / ROAD_HALF, -1, 1) * .018;
+    game.heading = lerp(game.heading, targetHeading, 1 - Math.exp(-dt * (drifting ? 3.7 : 6)));
+    const targetSlide = game.speed * Math.sin(game.heading) * (drifting ? .49 : .43);
+    game.lateralVelocity = lerp(game.lateralVelocity, targetSlide, 1 - Math.exp(-dt * (drifting ? 2.4 : 5)));
+    game.lateral += game.lateralVelocity * dt;
     const before = pose(oldDistance).tangent;
     const after = pose(game.distance).tangent;
-    const curvature = before.x * after.z - before.z * after.x;
-    game.lateral += curvature * game.speed * .18;
+    const curveTurn = Math.atan2(before.x * after.z - before.z * after.x,
+      before.x * after.x + before.z * after.z);
+    game.heading = clamp(game.heading + curveTurn * (drifting ? .25 : .12), -.34, .34);
+    if (Math.abs(game.lateral) > ROAD_HALF) {
+      game.lateralVelocity += -Math.sign(game.lateral) * dt * 8;
+    }
     game.lateral = clamp(game.lateral, -10.7, 10.7);
     if (drifting) game.driftCharge = clamp(game.driftCharge +
       dt * 38 * (.6 + game.speed / MAX_SPEED), 0, 100);
@@ -981,11 +1128,12 @@ function update(dt) {
   }
 
   const at = syncKart(playerKart, game.distance, game.lateral,
-    game.steerMomentum * (keys.drift ? 1.5 : 1), game.boostTime > 0);
+    game.steerMomentum * (keys.drift ? 1.5 : 1), game.boostTime > 0,
+    game.heading, game.speed, dt);
   for (let i = 0; i < game.ai.length; i++) {
     const ai = game.ai[i];
     if (!onlineRace) syncKart(opponents[i], ai.distance, ai.lateral,
-      Math.sin(game.raceTime * .7 + ai.phase) * .15);
+      Math.sin(game.raceTime * .7 + ai.phase) * .15, false, 0, ai.speed, dt);
   }
   if (onlineRace) syncRemoteKarts(dt);
   if (game.mode === 'racing' && keys.drift && game.speed > 13) {
@@ -1039,6 +1187,10 @@ function frame() {
   update(dt);
   if (game.mode !== 'menu') drawMinimap();
   renderer.render(scene, camera);
+  if (!ui.menu.hidden && previewRenderer) {
+    previewKart.rotation.y = -.3 + Math.sin(performance.now() * .0006) * .15;
+    previewRenderer.render(previewScene, previewCamera);
+  }
   requestAnimationFrame(frame);
 }
 
@@ -1088,10 +1240,52 @@ document.querySelectorAll('[data-control]').forEach((button) => {
   button.addEventListener('pointercancel', release);
   button.addEventListener('lostpointercapture', release);
 });
+const steeringPad = $('#steeringPad');
+function moveSteering(event) {
+  const bounds = steeringPad.getBoundingClientRect();
+  touchSteer = clamp((event.clientX - bounds.left - bounds.width / 2) / (bounds.width * .38), -1, 1);
+  $('#steeringKnob').style.transform = `translateX(${touchSteer * bounds.width * .31}px)`;
+  steeringPad.setAttribute('aria-valuenow', String(Math.round(touchSteer * 100)));
+}
+function releaseSteering(event) {
+  if (steeringPointer !== event.pointerId) return;
+  steeringPointer = null;
+  touchSteer = 0;
+  $('#steeringKnob').style.transform = 'translateX(0px)';
+  steeringPad.setAttribute('aria-valuenow', '0');
+}
+steeringPad.addEventListener('pointerdown', event => {
+  event.preventDefault();
+  steeringPointer = event.pointerId;
+  steeringPad.setPointerCapture(event.pointerId);
+  moveSteering(event);
+});
+steeringPad.addEventListener('pointermove', event => {
+  if (steeringPointer === event.pointerId) moveSteering(event);
+});
+steeringPad.addEventListener('pointerup', releaseSteering);
+steeringPad.addEventListener('pointercancel', releaseSteering);
+steeringPad.addEventListener('lostpointercapture', releaseSteering);
+steeringPad.addEventListener('keydown', event => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  event.preventDefault();
+  touchSteer = clamp(touchSteer + (event.key === 'ArrowRight' ? .2 : -.2), -1, 1);
+  $('#steeringKnob').style.transform = `translateX(${touchSteer * steeringPad.clientWidth * .31}px)`;
+  steeringPad.setAttribute('aria-valuenow', String(Math.round(touchSteer * 100)));
+});
 $('#characterChoices').addEventListener('click', event => {
   const button = event.target.closest('[data-character]');
   if (!button || game.mode !== 'menu') return;
   selectedCharacter = CHARACTERS.find(character => character.id === button.dataset.character) || CHARACTERS[0];
+  buildWorld(); renderChoices();
+});
+$('#garage').addEventListener('click', event => {
+  const swatch = event.target.closest('[data-part][data-color]');
+  const decal = event.target.closest('[data-decal]');
+  if (swatch) appearance[swatch.dataset.part] = Number(swatch.dataset.color);
+  else if (decal) appearance.decal = decal.dataset.decal;
+  else return;
+  try { localStorage.setItem('turbo-trail-garage', JSON.stringify(appearance)); } catch { /* Storage is optional. */ }
   buildWorld(); renderChoices();
 });
 $('#trackChoices').addEventListener('click', event => {
@@ -1119,6 +1313,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  resizePreview();
 });
 
 try {
