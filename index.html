@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#10142e" />
+    <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเล่นได้บนมือถือ แท็บเล็ต และคอม" />
+    <title>Turbo Trail — เกมแข่งโกคาร์ต</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
+      <canvas id="track" aria-label="สนามแข่งโกคาร์ต"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark">✦</span> TURBO<span>TRAIL</span></div>
+        <button id="pauseButton" class="icon-button" type="button" aria-label="หยุดเกมชั่วคราว" hidden>Ⅱ</button>
+      </header>
+
+      <section id="hud" class="hud" aria-label="ข้อมูลการแข่งขัน" hidden>
+        <div class="hud-card position-card"><span class="hud-label">อันดับ</span><strong id="position">1<span>/ 6</span></strong></div>
+        <div class="hud-card lap-card"><span class="hud-label">รอบ</span><strong id="lap">1<span>/ 3</span></strong></div>
+        <div class="hud-card time-card"><span class="hud-label">เวลา</span><strong id="time">00:00.0</strong></div>
+        <div class="speed-card"><strong id="speed">0</strong><span>KM/H</span></div>
+        <div class="meter-card">
+          <div class="meter-title"><span>DRIFT CHARGE</span><span id="chargeValue">0%</span></div>
+          <div class="meter"><div id="chargeFill"></div></div>
+          <div class="meter-hint" id="boostHint">ดริฟต์เพื่อชาร์จบูสต์</div>
+        </div>
+        <canvas id="minimap" width="150" height="150" aria-label="แผนที่สนาม"></canvas>
+      </section>
+
+      <section id="menu" class="overlay" aria-labelledby="menuTitle">
+        <div class="menu-card">
+          <div class="eyebrow">ARCADE KART RACING</div>
+          <h1 id="menuTitle">TURBO<br /><em>TRAIL</em></h1>
+          <p>ดริฟต์เข้าโค้ง เก็บพลังบูสต์ และแซงคู่แข่งให้ได้ก่อนครบ 3 รอบ</p>
+          <div class="feature-row"><span>✦ สนาม 3D แบบอาร์เคด</span><span>✦ คู่แข่ง 5 คัน</span><span>✦ เล่นได้ทุกจอ</span></div>
+          <button id="startButton" class="primary-button" type="button">เริ่มแข่งขัน <span>→</span></button>
+          <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · ↑ / W เร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ใช้ปุ่มสัมผัสด้านล่าง</span></div>
+        </div>
+      </section>
+
+      <section id="pauseMenu" class="overlay" aria-labelledby="pauseTitle" hidden>
+        <div class="modal-card"><div class="eyebrow">RACE PAUSED</div><h2 id="pauseTitle">พักก่อนนะ!</h2><p>พร้อมซิ่งต่อเมื่อไหร่กดปุ่มด้านล่าง</p><button id="resumeButton" class="primary-button" type="button">แข่งต่อ <span>→</span></button><button id="restartButton" class="text-button" type="button">เริ่มแข่งใหม่</button></div>
+      </section>
+
+      <section id="results" class="overlay" aria-labelledby="resultsTitle" hidden>
+        <div class="modal-card"><div class="eyebrow">FINISH LINE</div><h2 id="resultsTitle">เข้าเส้นชัย!</h2><div class="result-place" id="resultPlace">1st</div><p id="resultSummary"></p><button id="againButton" class="primary-button" type="button">แข่งอีกครั้ง <span>→</span></button></div>
+      </section>
+
+      <div id="countdown" class="countdown" aria-live="polite" hidden>3</div>
+      <div id="toast" class="toast" aria-live="polite" hidden></div>
+
+      <nav id="touchControls" class="touch-controls" aria-label="ปุ่มควบคุมเกม" hidden>
+        <div class="control-group steering"><button class="touch-button steer-button" data-control="left" aria-label="เลี้ยวซ้าย">‹</button><button class="touch-button steer-button" data-control="right" aria-label="เลี้ยวขวา">›</button></div>
+        <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
+      </nav>
+    </main>
+    <script src="game.js" defer></script>
+  </body>
+</html>
