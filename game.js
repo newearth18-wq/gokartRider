@@ -340,7 +340,8 @@ function createScenery() {
   for (let i = 0; i < (isHarbor ? 45 : isCanyon ? 10 : 25); i++) {
     const at = pose(trackLength * ((i * .193 + .07) % 1));
     const side = i % 2 ? -1 : 1;
-    const position = at.point.clone().addScaledVector(at.right, side * (42 + random() * 35));
+    const houseDistance = isSnow || isCanyon ? 42 + random() * 35 : 25 + random() * 28;
+    const position = at.point.clone().addScaledVector(at.right, side * houseDistance);
     const home = new THREE.Group();
     home.position.copy(position);
     home.rotation.y = random() * Math.PI * 2;
@@ -457,6 +458,15 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   shell.scale.set(1.55, .48, 2.22);
   const nose = mesh(new THREE.SphereGeometry(1, lite ? 10 : 22, lite ? 8 : 12), bodyLight, chassis, 0, .95, 1.34);
   nose.scale.set(.87, .34, 1.13);
+  for (const x of [-1.25, 1.25]) {
+    const pod = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), body, chassis, x, .91, -.12);
+    pod.scale.set(.48, .33, 1.36);
+    const fender = mesh(new THREE.SphereGeometry(1, lite ? 10 : 18, 10), bodyLight, chassis, x, .83, 1.42);
+    fender.scale.set(.44, .2, .66);
+    box(chassis, .28, .08, .75, dark, x * .62, 1.31, -1.61);
+  }
+  const intake = mesh(new THREE.SphereGeometry(1, 12, 8), dark, chassis, 0, .73, 2.19);
+  intake.scale.set(.55, .12, .1);
   const bumper = mesh(new THREE.SphereGeometry(1, 12, 8), accent, chassis, 0, .59, 2.27);
   bumper.scale.set(1.85, .17, .22);
   const rear = mesh(new THREE.SphereGeometry(1, 12, 8), dark, chassis, 0, .67, -2.0);
@@ -884,9 +894,7 @@ function resetRace(online = false, startAt = 0) {
   previousCountdown = '';
   Object.keys(keys).forEach((key) => { keys[key] = false; });
   pointerControls.clear();
-  touchSteer = 0;
-  steeringPointer = null;
-  $('#steeringKnob').style.transform = 'translateX(0px)';
+  resetTouchSteering();
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
   lastLeaderboardUpdate = 0;
   opponents.forEach(kart => { kart.visible = !online; });
@@ -906,6 +914,7 @@ function pauseRace() {
     ui.pauseMenu.hidden = false;
     ui.countdown.hidden = true;
     Object.keys(keys).forEach((key) => { keys[key] = false; });
+    resetTouchSteering();
   } else if (game.mode === 'paused') {
     game.mode = game.wasCounting ? 'countdown' : 'racing';
     ui.pauseMenu.hidden = true;
@@ -929,6 +938,7 @@ function finishRace() {
 
 function returnToMenu() {
   network.close();
+  setNetworkStatus('สร้างห้องหรือใส่รหัสห้องเพื่อแข่งกับเพื่อน สูงสุด 50 คน');
   onlineRace = false;
   connectedPlayers = [];
   ui.lobby.hidden = true;
@@ -1217,6 +1227,7 @@ window.addEventListener('keyup', (event) => {
 });
 window.addEventListener('blur', () => {
   Object.keys(keys).forEach((key) => { keys[key] = false; });
+  resetTouchSteering();
   if (game.mode === 'racing' && !onlineRace) pauseRace();
 });
 document.addEventListener('visibilitychange', () => {
@@ -1241,6 +1252,12 @@ document.querySelectorAll('[data-control]').forEach((button) => {
   button.addEventListener('lostpointercapture', release);
 });
 const steeringPad = $('#steeringPad');
+function resetTouchSteering() {
+  steeringPointer = null;
+  touchSteer = 0;
+  $('#steeringKnob').style.transform = 'translateX(0px)';
+  steeringPad.setAttribute('aria-valuenow', '0');
+}
 function moveSteering(event) {
   const bounds = steeringPad.getBoundingClientRect();
   touchSteer = clamp((event.clientX - bounds.left - bounds.width / 2) / (bounds.width * .38), -1, 1);
@@ -1249,10 +1266,7 @@ function moveSteering(event) {
 }
 function releaseSteering(event) {
   if (steeringPointer !== event.pointerId) return;
-  steeringPointer = null;
-  touchSteer = 0;
-  $('#steeringKnob').style.transform = 'translateX(0px)';
-  steeringPad.setAttribute('aria-valuenow', '0');
+  resetTouchSteering();
 }
 steeringPad.addEventListener('pointerdown', event => {
   event.preventDefault();
