@@ -39,4 +39,4 @@ export const CHARACTERS = [
 ];
 
 export const MAX_PLAYERS = 50;
-export const RACE_LAPS = 3;
+export const RACE_LAPS = 4;

@@ -27,7 +27,14 @@ const keys = { left: false, right: false, gas: false, drift: false, boost: false
 const pointerControls = new Map();
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const lerp = (a, b, t) => a + (b - a) * t;
-const ROAD_HALF = 12.5;
+const ROAD_HALF = 17.5;
+const FIRST_QUIZ_DISTANCE = 250;
+const QUIZ_INTERVAL = 850;
+const POWERS = {
+  nitro: { icon: '🚀', name: 'ไนโตร', detail: 'พุ่งเร็ว 3.5 วินาที' },
+  shield: { icon: '🛡️', name: 'เกราะป้องกัน', detail: 'กันชนและขอบสนาม 7 วินาที' },
+  pulse: { icon: '⚡', name: 'คลื่นพลัง', detail: 'ชะลอคู่แข่งด้านหน้า' },
+};
 const MAX_SPEED = 65;
 const touchLayout = () => matchMedia('(any-pointer: coarse)').matches || window.innerWidth <= 700;
 const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d];
@@ -80,7 +87,7 @@ try { questionBank = normalizeQuestions(JSON.parse(localStorage.getItem('turbo-t
 catch { /* Use the starter questions when storage is empty or invalid. */ }
 let raceQuestions = questionBank;
 let activeQuiz = null;
-let nextQuizDistance = 180;
+let nextQuizDistance = FIRST_QUIZ_DISTANCE;
 let quizCursor = 0;
 let quizCorrect = 0;
 let quizAttempted = 0;
@@ -93,6 +100,7 @@ let scannerStream = null;
 let scannerTimer = null;
 let scannerActive = false;
 let scannerDetector = null;
+let studentInviteCode = null;
 const network = new RaceConnection(onNetworkMessage, onNetworkClose);
 let game = freshGame();
 
@@ -125,7 +133,7 @@ function box(parent, width, height, depth, material, x, y, z) {
 }
 
 function createCurve() {
-  const points = selectedTrack.points.map(([x, y, z]) => new THREE.Vector3(x * 1.8, y * 1.25, z * 1.8));
+  const points = selectedTrack.points.map(([x, y, z]) => new THREE.Vector3(x * 2.5, y * 1.25, z * 2.5));
   curve = new THREE.CatmullRomCurve3(points, true, 'catmullrom', .5);
   curve.arcLengthDivisions = 1600;
   trackLength = curve.getLength();
@@ -175,7 +183,7 @@ function createRoad() {
   ribbon(-155, 155, terrain, -.42);
   const verge = makeMaterial(selectedTrack.verge, 1);
   verge.side = THREE.DoubleSide;
-  ribbon(-17, 17, verge, -.25);
+  ribbon(-ROAD_HALF - 8, ROAD_HALF + 8, verge, -.25);
 
   const asphaltCanvas = document.createElement('canvas');
   asphaltCanvas.width = asphaltCanvas.height = 128;
@@ -248,7 +256,7 @@ function createRoad() {
       const a = samples[i], b = samples[i + 1];
       for (const [p, y] of [[a, .35], [a, 1.05], [b, 1.05],
                             [a, .35], [b, 1.05], [b, .35]]) {
-        const v = p.point.clone().addScaledVector(p.right, side * 15.5);
+        const v = p.point.clone().addScaledVector(p.right, side * (ROAD_HALF + 3));
         positions.push(v.x, v.y + y, v.z);
       }
     }
@@ -259,7 +267,7 @@ function createRoad() {
     rail.material.side = THREE.DoubleSide;
     for (let i = 0; i < count; i += 17) {
       const p = samples[i];
-      const point = p.point.clone().addScaledVector(p.right, side * 15.5);
+      const point = p.point.clone().addScaledVector(p.right, side * (ROAD_HALF + 3));
       const dummy = new THREE.Object3D();
       dummy.position.set(point.x, point.y + .65, point.z);
       dummy.rotation.y = Math.atan2(p.tangent.x, p.tangent.z);
@@ -275,7 +283,7 @@ function createRoad() {
 
   const start = samples[0];
   const marker = makeMaterial(0xffffff, 1);
-  for (let column = 0; column < 16; column++) {
+  for (let column = 0; column < Math.floor((ROAD_HALF * 2 - 1.5) / 1.55); column++) {
     for (let row = 0; row < 2; row++) {
       const tile = box(scene, 1.55, .025, .9,
         (column + row) % 2 ? marker : makeMaterial(0x253444, 1),
@@ -312,9 +320,9 @@ function createArch(at) {
   const gantry = new THREE.Group();
   gantry.position.copy(at.point);
   gantry.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
-  box(gantry, .9, 8.3, .9, cobalt, -14.5, 4.1, 0);
-  box(gantry, .9, 8.3, .9, cobalt, 14.5, 4.1, 0);
-  box(gantry, 30, 1.6, 1.2, cobalt, 0, 8.2, 0);
+  box(gantry, .9, 8.3, .9, cobalt, -(ROAD_HALF + 4), 4.1, 0);
+  box(gantry, .9, 8.3, .9, cobalt, ROAD_HALF + 4, 4.1, 0);
+  box(gantry, (ROAD_HALF + 4) * 2 + 1, 1.6, 1.2, cobalt, 0, 8.2, 0);
   const sign = mesh(new THREE.PlaneGeometry(16, 3.4), signMat, gantry, 0, 8.2, .66);
   sign.material.transparent = false;
   const backSign = mesh(new THREE.PlaneGeometry(16, 3.4), signMat, gantry, 0, 8.2, -.66);
@@ -326,6 +334,32 @@ function createScenery() {
   const isCanyon = selectedTrack.decor === 'canyon';
   const isSnow = selectedTrack.decor === 'snow';
   const isHarbor = selectedTrack.decor === 'harbor';
+  const roadPoints = Array.from({ length: 300 }, (_, i) => curve.getPointAt(i / 300));
+  const minX = Math.min(...roadPoints.map(point => point.x));
+  const maxX = Math.max(...roadPoints.map(point => point.x));
+  const minZ = Math.min(...roadPoints.map(point => point.z));
+  const maxZ = Math.max(...roadPoints.map(point => point.z));
+  const mapCenterX = (minX + maxX) / 2;
+  const mapCenterZ = (minZ + maxZ) / 2;
+  function clearOfRoad(point, radius) {
+    const limit = (ROAD_HALF + radius + 4) ** 2;
+    for (let i = 0; i < roadPoints.length; i++) {
+      const a = roadPoints[i], b = roadPoints[(i + 1) % roadPoints.length];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const t = clamp(((point.x - a.x) * dx + (point.z - a.z) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+      const x = a.x + dx * t, z = a.z + dz * t;
+      if ((point.x - x) ** 2 + (point.z - z) ** 2 < limit) return false;
+    }
+    return true;
+  }
+  function roadside(at, side, initialDistance, radius) {
+    let position;
+    for (let distance = initialDistance; distance < 650; distance += 12) {
+      position = at.point.clone().addScaledVector(at.right, side * distance);
+      if (clearOfRoad(position, radius)) return position;
+    }
+    return position;
+  }
   const vegetationCount = isHarbor ? 65 : isCanyon ? 95 : 175;
   const trunkGeo = new THREE.CylinderGeometry(.26, .38, 2.5, 6);
   const leafGeo = isSnow || isCanyon ?
@@ -340,8 +374,7 @@ function createScenery() {
   for (let i = 0; i < vegetationCount; i++) {
     const sample = pose(trackLength * ((i * .61803398875) % 1));
     const side = i % 2 ? -1 : 1;
-    const offset = side * (22 + random() * 52);
-    const position = sample.point.clone().addScaledVector(sample.right, offset);
+    const position = roadside(sample, side, ROAD_HALF + 13 + random() * 52, 5);
     const scale = .75 + random() * .8;
     dummy.position.set(position.x, position.y + scale * 1.15, position.z);
     dummy.rotation.y = random() * Math.PI;
@@ -363,7 +396,7 @@ function createScenery() {
   for (let i = 0; i < 34; i++) {
     const at = pose(trackLength * (i + .35) / 34);
     const side = i % 2 ? -1 : 1;
-    const position = at.point.clone().addScaledVector(at.right, side * 17);
+    const position = roadside(at, side, ROAD_HALF + 8, 2);
     const flag = new THREE.Group();
     flag.position.copy(position);
     flag.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
@@ -379,8 +412,8 @@ function createScenery() {
   for (let i = 0; i < (isHarbor ? 45 : isCanyon ? 10 : 25); i++) {
     const at = pose(trackLength * ((i * .193 + .07) % 1));
     const side = i % 2 ? -1 : 1;
-    const houseDistance = isSnow || isCanyon ? 42 + random() * 35 : 25 + random() * 28;
-    const position = at.point.clone().addScaledVector(at.right, side * houseDistance);
+    const houseDistance = isSnow || isCanyon ? ROAD_HALF + 27 + random() * 35 : ROAD_HALF + 18 + random() * 28;
+    const position = roadside(at, side, houseDistance, 6);
     const home = new THREE.Group();
     home.position.copy(position);
     home.rotation.y = random() * Math.PI * 2;
@@ -406,11 +439,14 @@ function createScenery() {
     new THREE.Color(selectedTrack.mountain).lerp(new THREE.Color(0xffffff), .25)].map((color) => makeMaterial(color, 1));
   for (let i = 0; i < 22; i++) {
     const angle = i * Math.PI * 2 / 22;
-    const radius = 350 + random() * 90;
     const size = (isCanyon ? 65 : 55) + random() * 55;
+    const directionX = Math.cos(angle), directionZ = Math.sin(angle);
+    const outerRoad = Math.max(...roadPoints.map(point =>
+      (point.x - mapCenterX) * directionX + (point.z - mapCenterZ) * directionZ));
+    const radius = outerRoad + size + ROAD_HALF + 75 + random() * 35;
     const mountain = mesh(new THREE.ConeGeometry(size, size * 1.2, 5),
       mountainMaterials[i % mountainMaterials.length], scene,
-      65 + Math.cos(angle) * radius, size * .42 - 9, -30 + Math.sin(angle) * radius);
+      mapCenterX + directionX * radius, size * .42 - 9, mapCenterZ + directionZ * radius);
     mountain.rotation.y = random() * Math.PI;
   }
 
@@ -432,13 +468,13 @@ function createScenery() {
     const caveMaterial = makeMaterial(0xa45f45, 1);
     for (let i = 0; i < 13; i++) {
       const at = pose(trackLength * .34 + i * 6);
-      const arch = mesh(new THREE.TorusGeometry(14, 4.9, 8, 22), caveMaterial, scene,
+      const arch = mesh(new THREE.TorusGeometry(ROAD_HALF + 8, 3.2, 8, 22), caveMaterial, scene,
         at.point.x, at.point.y + 9.5, at.point.z);
       arch.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
     }
     for (let i = 0; i < 45; i++) {
       const at = pose(trackLength * ((i * .137 + .03) % 1));
-      const p = at.point.clone().addScaledVector(at.right, (i % 2 ? -1 : 1) * (24 + random() * 30));
+      const p = roadside(at, i % 2 ? -1 : 1, ROAD_HALF + 12 + random() * 30, 8);
       const rock = mesh(new THREE.DodecahedronGeometry(4 + random() * 5, 0), rockColors[i % 3], scene, p.x, p.y + 2, p.z);
       rock.scale.y = .65 + random() * 1.8;
     }
@@ -447,7 +483,7 @@ function createScenery() {
     const ice = makeMaterial(0xe9faff, .4);
     for (let i = 0; i < 55; i++) {
       const at = pose(trackLength * ((i * .271 + .11) % 1));
-      const p = at.point.clone().addScaledVector(at.right, (i % 2 ? -1 : 1) * (22 + random() * 40));
+      const p = roadside(at, i % 2 ? -1 : 1, ROAD_HALF + 10 + random() * 40, 4);
       mesh(new THREE.IcosahedronGeometry(2 + random() * 3, 0), ice, scene, p.x, p.y + 1, p.z);
     }
   }
@@ -455,7 +491,7 @@ function createScenery() {
     const water = new THREE.MeshStandardMaterial({ color: 0x2aa9d0, roughness: .27, metalness: .12, transparent: true, opacity: .92 });
     for (const side of [-1, 1]) {
       const at = pose(trackLength * (side < 0 ? .14 : .65));
-      const p = at.point.clone().addScaledVector(at.right, side * 122);
+      const p = roadside(at, side, 122, 90);
       mesh(new THREE.CircleGeometry(90, 64), water, scene, p.x, p.y - .20, p.z).rotation.x = -Math.PI / 2;
     }
   }
@@ -636,7 +672,17 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
     flame.visible = false;
     flames.push(flame);
   }
-  group.userData = { chassis, driver, head, arms, wheels, flames, lastDistance: 0, animationTime: 0 };
+  const shieldBubble = mesh(new THREE.SphereGeometry(2.55, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x56e4ff, transparent: true, opacity: .20,
+      depthWrite: false, side: THREE.DoubleSide }), chassis, 0, 1.8, 0);
+  shieldBubble.visible = false;
+  const pulseRing = mesh(new THREE.TorusGeometry(2.1, .12, 6, 28),
+    new THREE.MeshBasicMaterial({ color: 0xffe34d, transparent: true, opacity: .75,
+      depthWrite: false }), chassis, 0, .65, 0);
+  pulseRing.rotation.x = Math.PI / 2;
+  pulseRing.visible = false;
+  group.userData = { chassis, driver, head, arms, wheels, flames, shieldBubble, pulseRing,
+    waveTime: 0, lastDistance: 0, animationTime: 0 };
   scene.add(group);
   return group;
 }
@@ -708,7 +754,7 @@ function buildWorld() {
   game = freshGame();
 }
 
-function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0) {
+function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false) {
   const at = pose(distance);
   kart.position.copy(at.point).addScaledVector(at.right, lateral);
   const parts = kart.userData;
@@ -731,6 +777,14 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   for (const flame of kart.userData.flames) {
     flame.visible = boost;
     if (boost) flame.scale.y = .7 + Math.random() * .7;
+  }
+  parts.shieldBubble.visible = shield;
+  parts.waveTime = Math.max(0, parts.waveTime - dt);
+  parts.pulseRing.visible = parts.waveTime > 0;
+  if (parts.waveTime > 0) {
+    const progress = 1 - parts.waveTime;
+    parts.pulseRing.scale.setScalar(1 + progress * 4);
+    parts.pulseRing.material.opacity = parts.waveTime * .75;
   }
   return at;
 }
@@ -756,7 +810,7 @@ function syncRemoteKarts(dt) {
     kart.userData.distance = Math.abs(player.distance - kart.userData.distance) > 70 ?
       player.distance : lerp(kart.userData.distance, player.distance, Math.min(1, dt * 9));
     kart.userData.lateral = lerp(kart.userData.lateral, player.lateral, Math.min(1, dt * 9));
-    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt);
+    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield);
   }
   for (const [id, kart] of remoteKarts) {
     if (active.has(id)) continue;
@@ -851,10 +905,12 @@ function renderChoices() {
 
 function setOnlineSelection(enabled) {
   onlineSelected = enabled;
+  ui.menu.classList.toggle('student-invite', enabled && Boolean(studentInviteCode));
   $('#soloTab').classList.toggle('active', !enabled);
   $('#onlineTab').classList.toggle('active', enabled);
   $('#soloActions').hidden = enabled;
   $('#onlineActions').hidden = !enabled;
+  $('#studentJoinBanner').hidden = !enabled || !studentInviteCode;
   if (enabled) ui.networkStatus.textContent = 'สร้างห้องหรือใส่รหัสห้องเพื่อแข่งกับเพื่อน สูงสุด 50 คน';
 }
 
@@ -910,6 +966,18 @@ function qrRoomCode(raw) {
   } catch { return null; }
 }
 
+function prepareQrJoin(code) {
+  studentInviteCode = code;
+  setOnlineSelection(true);
+  $('#roomCode').value = code;
+  $('#studentRoomCode').textContent = code;
+  $('#studentJoinBanner').hidden = false;
+  $('#inviteNotice').hidden = true;
+  prepareStudentName();
+  ui.menu.hidden = false;
+  ui.menu.querySelector('.menu-card').scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function stopQrScanner() {
   scannerActive = false;
   clearTimeout(scannerTimer);
@@ -932,12 +1000,7 @@ async function scanQrFrame() {
         const code = qrRoomCode(result.rawValue);
         if (!code) { $('#scannerStatus').textContent = 'QR นี้ไม่ใช่ห้อง Turbo Trail'; continue; }
         stopQrScanner();
-        setOnlineSelection(true);
-        $('#roomCode').value = code;
-        $('#inviteNotice').hidden = false;
-        $('#inviteNotice').textContent = `พบห้อง ${code} · กำลังเข้าห้อง…`;
-        prepareStudentName();
-        connectRoom('join');
+        prepareQrJoin(code);
         return;
       }
     }
@@ -1019,8 +1082,10 @@ function onNetworkMessage(data) {
     ui.resultPlace.textContent = `${data.place}/${connectedPlayers.length}`;
   }
   if (data.type === 'item' && data.id !== network.id && data.item === 'pulse' && game.mode === 'racing') {
+    const attackerKart = remoteKarts.get(data.id);
+    if (attackerKart) attackerKart.userData.waveTime = 1;
     const attacker = connectedPlayers.find(player => player.id === data.id);
-    if (attacker && attacker.distance > game.distance && attacker.distance - game.distance < 90 && shieldTime <= 0) {
+    if (attacker && attacker.distance < game.distance && game.distance - attacker.distance < 120 && shieldTime <= 0) {
       pulseTime = 1.5;
       toast('โดนคลื่นพลัง! ⚡');
     }
@@ -1059,6 +1124,9 @@ async function connectRoom(action) {
       learning: learningEnabled, questions: learningEnabled ? questionBank : [],
     });
     renderLobby(data);
+    studentInviteCode = null;
+    $('#studentJoinBanner').hidden = true;
+    ui.menu.classList.remove('student-invite');
     $('#inviteNotice').hidden = true;
     try { sessionStorage.setItem('turbo-trail-player-name', $('#playerName').value.trim()); } catch { /* Storage is optional. */ }
     setNetworkStatus(`เชื่อมต่อห้อง ${data.code} แล้ว`);
@@ -1095,7 +1163,7 @@ function resetRace(online = false, startAt = 0) {
   pointerControls.clear();
   resetTouchSteering();
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
-  earnedPower = null; activeQuiz = null; nextQuizDistance = 180;
+  earnedPower = null; activeQuiz = null; nextQuizDistance = FIRST_QUIZ_DISTANCE;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
   $('#quizPanel').hidden = true;
   $('#quizBackdrop').hidden = true;
@@ -1181,6 +1249,7 @@ function showQuiz() {
   if (!learningEnabled || !raceQuestions.length || activeQuiz || game.mode !== 'racing') return;
   const index = quizCursor % raceQuestions.length;
   const question = raceQuestions[index];
+  const reward = ['nitro', 'shield', 'pulse'][quizCorrect % 3];
   activeQuiz = { index, deadline: performance.now() + 20000 };
   game.mode = 'quiz';
   game.speed = 0;
@@ -1189,6 +1258,7 @@ function showQuiz() {
   if (onlineRace) network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
     speed: 0, boost: false, shield: shieldTime > 0 });
   $('#quizQuestion').textContent = question.question;
+  $('#quizReward').textContent = `ตอบถูกได้ ${POWERS[reward].icon} ${POWERS[reward].name}`;
   $('#quizOptions').replaceChildren(...question.options.map((option, choice) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -1210,13 +1280,13 @@ function answerQuiz(choice) {
     quizAttempted++;
     if (choice === question.answer) {
       audio.cue('correct');
+      earnedPower = ['nitro', 'shield', 'pulse'][quizCorrect % 3];
       quizCorrect++;
-      earnedPower = ['nitro', 'shield', 'pulse'][(quizCorrect - 1) % 3];
-      toast('ถูกต้อง! ได้พลังพิเศษ กด BOOST เพื่อใช้ ✨', 2.4);
+      toast(`ถูกต้อง! ได้ ${POWERS[earnedPower].icon} ${POWERS[earnedPower].name} · กดใช้พลัง`, 2.4);
     } else { audio.cue('wrong'); toast(`ยังไม่ถูก · คำตอบคือ ${question.options[question.answer]}`, 2.4); }
   } else { audio.cue('wrong'); toast('ข้ามคำถามแล้ว', 1.2); }
   quizCursor++;
-  nextQuizDistance = Math.max(nextQuizDistance + 300, game.distance + 240);
+  nextQuizDistance = Math.max(nextQuizDistance + QUIZ_INTERVAL, game.distance + QUIZ_INTERVAL);
   activeQuiz = null;
   $('#quizPanel').hidden = true;
   $('#quizBackdrop').hidden = true;
@@ -1270,7 +1340,7 @@ function updateHud() {
   }
   ui.position.innerHTML = String(rank()) + `<span>/ ${onlineRace ? Math.max(1, connectedPlayers.length) : 6}</span>`;
   ui.lap.innerHTML = String(Math.max(1, Math.min(RACE_LAPS, Math.floor(game.distance / trackLength) + 1))) +
-    '<span>/ 3</span>';
+    `<span>/ ${RACE_LAPS}</span>`;
   ui.time.textContent = formatTime(game.raceTime);
   ui.speed.textContent = String(Math.round(game.speed * 3.6));
   ui.charge.textContent = String(Math.floor(game.driftCharge)) + '%';
@@ -1282,6 +1352,14 @@ function updateHud() {
     game.boostTime > 0 ? 'TURBO ACTIVE!' :
     ready ? 'บูสต์พร้อมแล้ว!' : 'ดริฟต์เพื่อชาร์จบูสต์';
   $('.boost-button').classList.toggle('ready', ready);
+  const shownPower = power || (shieldTime > 0 ? 'shield' : null);
+  $('#powerCard').hidden = !shownPower;
+  if (shownPower) {
+    $('#powerIcon').textContent = POWERS[shownPower].icon;
+    $('#powerName').textContent = POWERS[shownPower].name;
+    $('#powerDescription').textContent = power ? POWERS[shownPower].detail : `ทำงานอยู่ ${Math.ceil(shieldTime)} วินาที`;
+    $('#powerUseButton').hidden = !power;
+  }
 }
 
 function useBoost() {
@@ -1293,7 +1371,10 @@ function useBoost() {
     else if (item === 'shield') { shieldTime = 7; toast('โล่ป้องกันพร้อม! 🛡️'); }
     else {
       pulseTime = 0;
-      if (!onlineRace) game.ai.forEach(ai => { if (ai.distance > game.distance && ai.distance - game.distance < 90) ai.speed *= .72; });
+      playerKart.userData.waveTime = 1;
+      if (!onlineRace) game.ai.forEach(ai => {
+        if (ai.distance > game.distance && ai.distance - game.distance < 120) ai.slowTime = 2.5;
+      });
       toast('ปล่อยคลื่นพลัง! ⚡');
     }
     if (onlineRace && (selectedMode === 'item' || learningEnabled)) network.send({ type: 'item', item });
@@ -1371,11 +1452,16 @@ function update(dt) {
     if (Math.abs(game.lateral) > ROAD_HALF) {
       game.lateralVelocity += -Math.sign(game.lateral) * dt * 8;
     }
-    game.lateral = clamp(game.lateral, -14.2, 14.2);
+    if (Math.abs(game.lateral) > ROAD_HALF + .75) {
+      game.lateral = Math.sign(game.lateral) * (ROAD_HALF + .75);
+      game.lateralVelocity = -Math.sign(game.lateral) * Math.min(1.2, Math.abs(game.lateralVelocity) * .2);
+      if (shieldTime <= 0) game.speed *= .92;
+    }
     if (drifting) game.driftCharge = clamp(game.driftCharge +
       dt * 38 * (.6 + game.speed / MAX_SPEED), 0, 100);
     for (const opponent of onlineRace ? [] : game.ai) {
-      opponent.distance += opponent.speed * dt *
+      opponent.slowTime = Math.max(0, (opponent.slowTime || 0) - dt);
+      opponent.distance += opponent.speed * (opponent.slowTime > 0 ? .62 : 1) * dt *
         (1 + Math.sin(game.raceTime * .32 + opponent.phase) * .045);
       opponent.lateral += (Math.sin(game.raceTime * .5 + opponent.phase) * 3.2 -
         opponent.lateral) * dt * .26;
@@ -1420,7 +1506,7 @@ function update(dt) {
 
   const at = syncKart(playerKart, game.distance, game.lateral,
     game.steerMomentum * (keys.drift ? 1.5 : 1), game.boostTime > 0,
-    game.heading, game.speed, dt);
+    game.heading, game.speed, dt, shieldTime > 0);
   for (let i = 0; i < game.ai.length; i++) {
     const ai = game.ai[i];
     if (!onlineRace) syncKart(opponents[i], ai.distance, ai.lateral,
@@ -1693,6 +1779,7 @@ $('#questionFile').addEventListener('change', async event => {
 });
 $('#learningToggle').addEventListener('change', event => { learningEnabled = event.target.checked; });
 $('#skipQuestion').addEventListener('click', () => answerQuiz(null));
+$('#powerUseButton').addEventListener('click', useBoost);
 function updateSoundButton() {
   const button = $('#soundButton');
   button.textContent = audio.enabled ? '🔊' : '🔇';
@@ -1737,6 +1824,7 @@ $('#copyInviteButton').addEventListener('click', async () => {
 });
 $('#createRoomButton').addEventListener('click', () => connectRoom('create'));
 $('#joinRoomButton').addEventListener('click', () => connectRoom('join'));
+$('#studentJoinButton').addEventListener('click', () => connectRoom('join'));
 $('#lobbyStart').addEventListener('click', () => network.send({ type: 'start' }));
 $('#lobbyLeave').addEventListener('click', returnToMenu);
 $('#startButton').addEventListener('click', () => resetRace(false));
@@ -1766,12 +1854,7 @@ try {
   frame();
   const sharedCode = new URLSearchParams(location.search).get('room')?.trim().toUpperCase();
   if (/^[A-Z2-9]{5}$/.test(sharedCode || '')) {
-    setOnlineSelection(true);
-    $('#roomCode').value = sharedCode;
-    prepareStudentName();
-    $('#inviteNotice').hidden = false;
-    $('#inviteNotice').textContent = `พบห้อง ${sharedCode} · กำลังเข้าห้อง…`;
-    connectRoom('join');
+    prepareQrJoin(sharedCode);
   }
 } catch (error) {
   console.error(error);

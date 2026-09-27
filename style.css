@@ -136,3 +136,16 @@ body.quiz-active .topbar,body.quiz-active .hud,body.quiz-active .touch-controls{
   .quiz-panel h2{font-size:15px;margin:6px 0}.quiz-options button{min-height:34px}.quiz-panel #skipQuestion{margin-top:4px}
 }
 @media (max-width:480px) and (orientation:portrait){.quiz-options{grid-template-columns:1fr}.quiz-options button{min-height:41px}.speed-card{display:none}.meter-card{top:145px}}
+
+.student-join-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;padding:10px 12px;border:2px solid #69e8fb;border-radius:14px;background:#0a4676db;color:#fff;box-shadow:0 8px 25px #08183666}
+.student-join-banner strong{color:#ffe448;font-size:18px}.student-join-banner span:nth-child(2){flex:1;min-width:130px;font-size:13px}
+.student-join-banner button{border:0;border-radius:9px;padding:7px 12px;background:#ffe448;color:#182e57;font-weight:900;white-space:nowrap}
+@media(max-width:480px){.student-join-banner button{width:100%}.student-join-banner span:nth-child(2){font-size:11px}}
+#menu.student-invite .track-selection-title,#menu.student-invite #trackChoices,#menu.student-invite .race-selection-title,#menu.student-invite .race-modes,#menu.student-invite .learning-menu,#menu.student-invite .room-actions,#menu.student-invite #scanQrButton,#menu.student-invite .instructions{display:none}
+#menu.student-invite #onlineActions{margin-top:12px}
+
+.power-card{position:absolute;top:66px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;width:min(270px,32vw);padding:7px 8px;border:1px solid #ffe46e;border-radius:12px;background:#102753e8;box-shadow:0 7px 18px #08173a83;backdrop-filter:blur(8px);pointer-events:auto}
+.power-card>span{font-size:23px;line-height:1}.power-card>div{min-width:0;flex:1}.power-card strong,.power-card small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.power-card strong{font-size:12px;color:#ffe66a}.power-card small{font-size:9px;color:#d7f3ff}.power-card button{border:0;border-radius:8px;background:#ffe448;color:#172852;padding:5px 7px;font-size:10px;font-weight:900;white-space:nowrap}
+.quiz-reward{display:inline-block;margin-top:8px;padding:4px 9px;border-radius:999px;background:#ffe448;color:#1a315d;font-size:12px;font-weight:900}
+@media(max-width:700px){.power-card{top:93px;width:185px;padding:4px 6px;gap:5px}.power-card>span{font-size:17px}.power-card strong{font-size:10px}.power-card small{font-size:8px}.power-card button{font-size:8px;padding:4px 5px}}
+@media(max-width:480px) and (orientation:portrait){.power-card{top:183px;width:190px}}

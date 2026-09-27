@@ -131,7 +131,7 @@ function handleMessage(client, message) {
     // A loose sanity bound blocks arbitrary leaderboard jumps without impacting boosts.
     const maxDistance = elapsed * 100 + 60;
     client.distance = Math.min(Math.max(client.distance - 2, distance), maxDistance);
-    client.lateral = Math.max(-15, Math.min(15, lateral));
+    client.lateral = Math.max(-20, Math.min(20, lateral));
     client.speed = Math.max(0, Math.min(90, speed));
     client.boost = Boolean(message.boost);
     client.shield = Boolean(message.shield);

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=6-0" />
+    <link rel="stylesheet" href="style.css?v=7-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -20,7 +20,7 @@
 
       <section id="hud" class="hud" aria-label="ข้อมูลการแข่งขัน" hidden>
         <div class="hud-card position-card"><span class="hud-label">อันดับ</span><strong id="position">1<span>/ 6</span></strong></div>
-        <div class="hud-card lap-card"><span class="hud-label">รอบ</span><strong id="lap">1<span>/ 3</span></strong></div>
+        <div class="hud-card lap-card"><span class="hud-label">รอบ</span><strong id="lap">1<span>/ 4</span></strong></div>
         <div class="hud-card time-card"><span class="hud-label">เวลา</span><strong id="time">00:00.0</strong></div>
         <button id="leaderboardButton" class="leaderboard-button" type="button" aria-expanded="false" aria-controls="leaderboard">อันดับทั้งหมด ▾</button>
         <ol id="leaderboard" class="leaderboard" aria-label="อันดับนักแข่ง" hidden></ol>
@@ -31,6 +31,7 @@
           <div class="meter-hint" id="boostHint">ดริฟต์เพื่อชาร์จบูสต์</div>
         </div>
         <div id="learningScore" class="learning-score" hidden>📘 ตอบถูก <strong id="quizScore">0/0</strong></div>
+        <div id="powerCard" class="power-card" hidden><span id="powerIcon"></span><div><strong id="powerName"></strong><small id="powerDescription"></small></div><button id="powerUseButton" type="button">ใช้พลัง</button></div>
         <canvas id="minimap" width="150" height="150" aria-label="แผนที่สนาม"></canvas>
       </section>
 
@@ -43,6 +44,7 @@
             <button id="soloTab" class="mode-tab active" type="button">🏁 เล่นคนเดียว</button>
             <button id="onlineTab" class="mode-tab" type="button">🌐 แข่งออนไลน์</button>
           </div>
+          <div id="studentJoinBanner" class="student-join-banner" hidden><strong>ห้อง <span id="studentRoomCode"></span></strong><span>เลือกนักขับและแต่งรถก่อนเข้าห้อง</span><button id="studentJoinButton" type="button">เข้าห้องนี้ →</button></div>
           <div class="selection-title"><strong>นักขับ</strong><span id="characterCaption">โนวา · นักซิ่งดาวรุ่ง</span></div>
           <div id="characterChoices" class="character-choices" role="group" aria-label="เลือกนักขับ"></div>
           <div class="garage-preview"><canvas id="garagePreview" aria-label="ตัวอย่างรถและนักขับสามมิติ"></canvas><span>ตัวอย่าง 3D</span></div>
@@ -53,9 +55,9 @@
             <div class="garage-row"><span>สีล้อ</span><div id="rimChoices" class="swatches" role="group" aria-label="สีล้อ"></div></div>
             <div class="garage-row"><span>ลายรถ</span><div id="decalChoices" class="decal-choices" role="group" aria-label="ลายรถ"></div></div>
           </div>
-          <div class="selection-title"><strong>สนามแข่ง</strong><span id="trackCaption">สวนสายรุ้ง</span></div>
+          <div class="selection-title track-selection-title"><strong>สนามแข่ง</strong><span id="trackCaption">สวนสายรุ้ง</span></div>
           <div id="trackChoices" class="track-choices" role="group" aria-label="เลือกสนาม"></div>
-          <div class="selection-title"><strong>โหมดแข่ง</strong></div>
+          <div class="selection-title race-selection-title"><strong>โหมดแข่ง</strong></div>
           <div class="race-modes" role="group" aria-label="เลือกโหมดแข่ง">
             <button class="race-mode active" data-race-mode="speed" type="button">⚡ สปีดเรซ</button>
             <button class="race-mode" data-race-mode="item" type="button">🎁 ไอเท็มเรซ</button>
@@ -89,12 +91,12 @@
       <div id="quizBackdrop" class="quiz-backdrop" hidden></div>
       <section id="quizPanel" class="quiz-panel" aria-labelledby="quizQuestion" role="dialog" aria-modal="true" hidden>
         <div class="quiz-top"><span>📘 ตอบถูกเพื่อรับพลังพิเศษ</span><span id="quizTimer"></span></div>
-        <h2 id="quizQuestion"></h2><div id="quizOptions" class="quiz-options"></div>
+        <div id="quizReward" class="quiz-reward"></div><h2 id="quizQuestion"></h2><div id="quizOptions" class="quiz-options"></div>
         <button id="skipQuestion" type="button">ข้ามข้อนี้</button>
       </section>
 
       <section id="lobby" class="overlay" aria-labelledby="lobbyTitle" hidden>
-        <div class="modal-card lobby-card"><div class="eyebrow">LIVE RACE ROOM</div><h2 id="lobbyTitle">ห้อง <span id="lobbyCode"></span></h2><p id="lobbyDetails"></p><div class="lobby-count"><strong id="lobbyCount">1</strong><span>/ 50 คน</span></div><div class="lobby-invite"><canvas id="roomQr" width="300" height="300" role="img" aria-label="QR สำหรับสแกนเข้าห้องแข่ง"></canvas><p>ให้นักเรียนสแกน QR นี้ด้วยกล้องมือถือเพื่อเข้าห้อง</p><a id="inviteUrl" class="invite-url" href="#" target="_blank" rel="noopener"></a><div class="invite-actions"><button id="expandQrButton" type="button">ขยาย QR</button><button id="copyInviteButton" type="button">คัดลอกลิงก์</button></div></div><div id="lobbyPlayers" class="lobby-players"></div><button id="lobbyStart" class="primary-button" type="button">เริ่มแข่ง <span>→</span></button><button id="lobbyLeave" class="text-button" type="button">ออกจากห้อง</button><p class="lobby-hint">เข้าห้องได้สูงสุด 50 คน · เริ่มแข่งขันเมื่อทุกคนพร้อม</p></div>
+        <div class="modal-card lobby-card"><div class="eyebrow">LIVE RACE ROOM</div><h2 id="lobbyTitle">ห้อง <span id="lobbyCode"></span></h2><p id="lobbyDetails"></p><div class="lobby-count"><strong id="lobbyCount">1</strong><span>/ 50 คน</span></div><div class="lobby-invite"><canvas id="roomQr" width="300" height="300" role="img" aria-label="QR สำหรับสแกนเข้าห้องแข่ง"></canvas><p>ให้นักเรียนสแกน QR เลือกตัวละครและแต่งรถ แล้วกดเข้าห้อง</p><a id="inviteUrl" class="invite-url" href="#" target="_blank" rel="noopener"></a><div class="invite-actions"><button id="expandQrButton" type="button">ขยาย QR</button><button id="copyInviteButton" type="button">คัดลอกลิงก์</button></div></div><div id="lobbyPlayers" class="lobby-players"></div><button id="lobbyStart" class="primary-button" type="button">เริ่มแข่ง <span>→</span></button><button id="lobbyLeave" class="text-button" type="button">ออกจากห้อง</button><p class="lobby-hint">เข้าห้องได้สูงสุด 50 คน · เริ่มแข่งขันเมื่อทุกคนพร้อม</p></div>
       </section>
 
       <section id="qrFullscreen" class="overlay qr-fullscreen" aria-labelledby="qrFullscreenTitle" hidden><div class="modal-card qr-fullscreen-card"><h2 id="qrFullscreenTitle">สแกนเพื่อเข้าห้อง <span id="qrFullscreenCode"></span></h2><canvas id="roomQrLarge" width="480" height="480" role="img" aria-label="QR ขนาดใหญ่สำหรับเข้าห้องแข่ง"></canvas><p>เปิดกล้องมือถือ สแกน QR แล้วรอในห้องก่อนเริ่มแข่ง</p><button id="closeQrFullscreen" class="primary-button" type="button">กลับไปที่ห้อง</button></div></section>
@@ -117,6 +119,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=6-0"></script>
+    <script type="module" src="game.js?v=7-0"></script>
   </body>
 </html>
