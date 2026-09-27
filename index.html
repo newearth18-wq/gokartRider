@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=5-0" />
+    <link rel="stylesheet" href="style.css?v=6-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -15,14 +15,15 @@
 
       <header class="topbar">
         <div class="brand"><span class="brand-mark">✦</span> TURBO<span>TRAIL</span><small id="roomBadge" hidden></small></div>
-        <button id="pauseButton" class="icon-button" type="button" aria-label="หยุดเกมชั่วคราว" hidden>Ⅱ</button>
+        <div class="top-actions"><button id="soundButton" class="icon-button" type="button" aria-label="ปิดเสียง" title="เปิด/ปิดเสียง">🔊</button><button id="pauseButton" class="icon-button" type="button" aria-label="หยุดเกมชั่วคราว" hidden>Ⅱ</button></div>
       </header>
 
       <section id="hud" class="hud" aria-label="ข้อมูลการแข่งขัน" hidden>
         <div class="hud-card position-card"><span class="hud-label">อันดับ</span><strong id="position">1<span>/ 6</span></strong></div>
         <div class="hud-card lap-card"><span class="hud-label">รอบ</span><strong id="lap">1<span>/ 3</span></strong></div>
         <div class="hud-card time-card"><span class="hud-label">เวลา</span><strong id="time">00:00.0</strong></div>
-        <ol id="leaderboard" class="leaderboard" aria-label="อันดับนักแข่ง"></ol>
+        <button id="leaderboardButton" class="leaderboard-button" type="button" aria-expanded="false" aria-controls="leaderboard">อันดับทั้งหมด ▾</button>
+        <ol id="leaderboard" class="leaderboard" aria-label="อันดับนักแข่ง" hidden></ol>
         <div class="speed-card"><strong id="speed">0</strong><span>KM/H</span></div>
         <div class="meter-card">
           <div class="meter-title"><span>DRIFT CHARGE</span><span id="chargeValue">0%</span></div>
@@ -69,7 +70,7 @@
             <p id="inviteNotice" class="invite-notice" role="status" hidden></p>
             <p id="networkStatus" class="network-status" role="status">กำลังตรวจเซิร์ฟเวอร์…</p>
           </div>
-          <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · ↑ / W เร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ลากแป้นเลี้ยวด้านซ้าย · กด DRIFT เข้าโค้ง · หมุนจอแนวนอนเพื่อมุมมองกว้าง</span></div>
+          <div class="instructions"><span>คอม: ← → หรือ A D เลี้ยว · กด ↑ / W ค้างเพื่อเร่ง · Space ดริฟต์ · Shift บูสต์</span><span>มือถือ: ลากแป้นเลี้ยวด้านซ้าย · กด GO ค้างเพื่อเร่ง · กด DRIFT เข้าโค้ง</span></div>
         </div>
       </section>
 
@@ -85,7 +86,8 @@
         </div>
       </section>
 
-      <section id="quizPanel" class="quiz-panel" aria-labelledby="quizQuestion" hidden>
+      <div id="quizBackdrop" class="quiz-backdrop" hidden></div>
+      <section id="quizPanel" class="quiz-panel" aria-labelledby="quizQuestion" role="dialog" aria-modal="true" hidden>
         <div class="quiz-top"><span>📘 ตอบถูกเพื่อรับพลังพิเศษ</span><span id="quizTimer"></span></div>
         <h2 id="quizQuestion"></h2><div id="quizOptions" class="quiz-options"></div>
         <button id="skipQuestion" type="button">ข้ามข้อนี้</button>
@@ -115,6 +117,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=5-0"></script>
+    <script type="module" src="game.js?v=6-0"></script>
   </body>
 </html>

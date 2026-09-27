@@ -87,3 +87,52 @@
 .lobby-card{padding:18px 26px}.lobby-card h2{margin:4px 0}.lobby-card>p{margin:5px 0}.lobby-card .primary-button{margin:10px auto}.lobby-card .lobby-count strong{font-size:34px}.lobby-card .lobby-invite{margin:8px auto}.lobby-card .lobby-invite canvas{width:min(205px,55vw)}.lobby-card .lobby-players{margin:8px 0}
 .scanner-card video[hidden]{display:none}
 @media(max-width:700px){.lobby-invite{margin:8px auto;padding:8px}.lobby-invite canvas{width:min(195px,52vw)}.lobby-players{max-height:90px}.qr-fullscreen-card{padding:14px}.qr-fullscreen-card canvas{width:min(78vw,52dvh)}.scanner-card{padding:15px}}
+
+/* Race view: keep the road visible and open secondary information on demand. */
+.topbar{z-index:11}.top-actions{display:flex;gap:8px;pointer-events:auto}
+.top-actions .icon-button{width:39px;height:39px;font-size:19px}
+.hud-card{top:64px;min-width:76px;padding:6px 10px;border-radius:11px}
+.position-card{left:max(16px,env(safe-area-inset-left))}
+.lap-card{left:calc(max(16px,env(safe-area-inset-left)) + 86px)}
+.time-card{left:calc(max(16px,env(safe-area-inset-left)) + 172px)}
+.hud-label{font-size:10px}.hud-card strong{font-size:19px}.hud-card strong span{font-size:11px}
+.leaderboard-button{position:absolute;top:121px;left:max(16px,env(safe-area-inset-left));padding:4px 10px;border:1px solid #ffffff70;border-radius:999px;background:#112752ca;color:#fff;font-size:11px;font-weight:700;pointer-events:auto;backdrop-filter:blur(8px)}
+.leaderboard{top:151px;left:max(16px,env(safe-area-inset-left));z-index:2}
+.leaderboard[hidden]{display:none!important}
+.meter-card{bottom:17px;width:min(230px,25vw);padding:7px 10px}.meter-hint{display:none}
+.speed-card{right:20px;bottom:17px;min-width:75px}.speed-card strong{font-size:35px}.speed-card span{font-size:9px}
+#minimap{top:58px;right:16px;width:103px;height:103px;border-radius:12px}
+.learning-score{top:170px;right:16px;font-size:10px;padding:3px 7px}
+.quiz-backdrop{position:absolute;inset:0;z-index:8;background:#0817359a;backdrop-filter:blur(3px)}
+.quiz-panel{position:absolute;z-index:9;top:50%;left:50%;right:auto;transform:translate(-50%,-50%);width:min(540px,calc(100vw - 24px));max-height:calc(100dvh - 20px);overflow:auto;padding:20px 22px;border-radius:20px;background:linear-gradient(145deg,#194488,#0a1e4c);border:2px solid #67e5ff;box-shadow:0 22px 70px #000a}
+.quiz-panel h2{font-size:clamp(17px,2vw,23px);line-height:1.3;margin:11px 0}
+.quiz-top{font-size:12px}.quiz-options{gap:8px}.quiz-options button{min-height:49px;padding:8px 12px;font-size:14px}
+.quiz-panel #skipQuestion{font-size:12px;margin-top:10px}
+.quiz-backdrop[hidden]{display:none!important}
+body.quiz-active .topbar,body.quiz-active .hud,body.quiz-active .touch-controls{visibility:hidden}
+
+@media (any-pointer:coarse){
+  .touch-controls{bottom:calc(12px + env(safe-area-inset-bottom));left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right))}
+  .touch-button{width:clamp(55px,8vw,68px);height:clamp(55px,8vw,68px);border-radius:17px}
+  .steering-pad{width:clamp(142px,20vw,185px);height:62px}
+  .meter-card{top:12px;bottom:auto;width:145px}
+  .speed-card{right:130px;top:68px;bottom:auto;text-align:right;min-width:0}
+  .speed-card strong{font-size:23px}.speed-card span{font-size:8px}
+}
+@media (max-width:700px){
+  .hud-card{top:50px;min-width:59px;padding:4px 7px}.position-card{left:9px}.lap-card{left:77px}.time-card{left:145px}
+  .hud-card strong{font-size:16px}.hud-card strong span{font-size:10px}.hud-label{font-size:8px}
+  .leaderboard-button{top:98px;left:9px;font-size:9px;padding:3px 7px}.leaderboard{top:123px;left:9px}
+  #minimap{top:49px;right:9px;width:78px;height:78px}.learning-score{top:130px;right:9px}
+  .speed-card{top:57px;right:95px;bottom:auto}.speed-card strong{font-size:19px}
+  .meter-card{top:10px;bottom:auto;width:110px;padding:5px 6px}.meter-title{font-size:7px}.meter{height:6px;margin-top:3px}
+  .quiz-panel{top:50%;left:50%;transform:translate(-50%,-50%);width:calc(100vw - 22px);max-height:calc(100dvh - 14px);padding:12px 14px}
+  .quiz-panel h2{font-size:16px;margin:8px 0}.quiz-options button{min-height:38px;font-size:12px;padding:5px 8px}
+}
+@media (max-height:500px){
+  .topbar{padding-top:5px}.hud-card{top:45px}.leaderboard-button{top:91px}.leaderboard{top:116px;max-height:calc(100dvh - 145px)}
+  #minimap{top:43px}.learning-score{top:123px}.speed-card{top:54px}
+  .quiz-panel{max-height:calc(100dvh - 12px);padding:10px 14px}
+  .quiz-panel h2{font-size:15px;margin:6px 0}.quiz-options button{min-height:34px}.quiz-panel #skipQuestion{margin-top:4px}
+}
+@media (max-width:480px) and (orientation:portrait){.quiz-options{grid-template-columns:1fr}.quiz-options button{min-height:41px}.speed-card{display:none}.meter-card{top:145px}}

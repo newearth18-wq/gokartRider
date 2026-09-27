@@ -3,6 +3,7 @@ import { TRACKS, CHARACTERS, MAX_PLAYERS, RACE_LAPS } from './config.js';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
+import { GameAudio } from './audio.js';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -31,6 +32,7 @@ const MAX_SPEED = 65;
 const touchLayout = () => matchMedia('(any-pointer: coarse)').matches || window.innerWidth <= 700;
 const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d];
 const clock = new THREE.Clock();
+const audio = new GameAudio();
 const up = new THREE.Vector3(0, 1, 0);
 let renderer;
 let scene;
@@ -329,7 +331,7 @@ function createScenery() {
   const leafGeo = isSnow || isCanyon ?
     new THREE.ConeGeometry(isCanyon ? 1.25 : 2.3, isCanyon ? 4 : 5, 12) :
     new THREE.SphereGeometry(2.5, 12, 8);
-  const foliage = new THREE.MeshLambertMaterial({ color: selectedTrack.foliage });
+  const foliage = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const trunks = new THREE.InstancedMesh(trunkGeo, makeMaterial(isSnow ? 0x71888a : 0x7e624a, 1), vegetationCount);
   const crowns = new THREE.InstancedMesh(leafGeo, foliage, vegetationCount);
   const dummy = new THREE.Object3D();
@@ -348,9 +350,27 @@ function createScenery() {
     dummy.position.y = position.y + scale * (isCanyon ? 4.1 : 5.3);
     if (!isSnow && !isCanyon) dummy.scale.set(scale * 1.7, scale * 1.3, scale * 1.7);
     dummy.updateMatrix(); crowns.setMatrixAt(i, dummy.matrix);
+    const leafColor = new THREE.Color(selectedTrack.foliage);
+    leafColor.offsetHSL((random() - .5) * .09, random() * .12, (random() - .5) * .20);
+    crowns.setColorAt(i, leafColor);
   }
   trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
+  crowns.instanceColor.needsUpdate = true;
   scene.add(trunks, crowns);
+
+  const pennantColors = [0xffde42, 0xff6c9b, 0x4de9eb, 0x926dff].map(color => makeMaterial(color, .45));
+  const poleMaterial = makeMaterial(0xf3f9ff, .45);
+  for (let i = 0; i < 34; i++) {
+    const at = pose(trackLength * (i + .35) / 34);
+    const side = i % 2 ? -1 : 1;
+    const position = at.point.clone().addScaledVector(at.right, side * 17);
+    const flag = new THREE.Group();
+    flag.position.copy(position);
+    flag.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
+    box(flag, .12, 3.2, .12, poleMaterial, 0, 1.6, 0);
+    box(flag, 1.65, .85, .07, pennantColors[i % pennantColors.length], side * .82, 2.69, 0);
+    scene.add(flag);
+  }
 
   const houseColors = isHarbor ? [0x66c9da, 0xffd075, 0xf8a09d, 0xe7e8f8] :
     isSnow ? [0xf2f8ff, 0xd6e8f2, 0xb5d8ec, 0xffffff] :
@@ -470,16 +490,24 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   const helmet = makeMaterial(look.helmet ?? character.helmet, .24, .06);
   const suit = makeMaterial(character.suit, .5);
   const accent = makeMaterial(character.accent, .28);
+  const highlight = makeMaterial(0xffdf45, .22, .08);
+  const white = makeMaterial(0xffffff, .18);
   const eye = makeMaterial(0x14233b, .13);
 
   box(chassis, 2.6, .28, 3.7, dark, 0, .64, 0);
   const shell = mesh(new THREE.SphereGeometry(1, lite ? 12 : 24, lite ? 8 : 14), body, chassis, 0, .98, .1);
   shell.scale.set(1.55, .48, 2.22);
+  const centerStripe = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), accent, chassis, 0, 1.39, .12);
+  centerStripe.scale.set(.35, .045, 1.71);
   const nose = mesh(new THREE.SphereGeometry(1, lite ? 10 : 22, lite ? 8 : 12), bodyLight, chassis, 0, .95, 1.34);
   nose.scale.set(.87, .34, 1.13);
+  const noseStripe = mesh(new THREE.SphereGeometry(1, 16, 10), highlight, chassis, 0, 1.20, 1.66);
+  noseStripe.scale.set(.17, .035, .72);
   for (const x of [-1.25, 1.25]) {
     const pod = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), body, chassis, x, .91, -.12);
     pod.scale.set(.48, .33, 1.36);
+    const podStripe = mesh(new THREE.SphereGeometry(1, 12, 8), accent, chassis, x, 1.14, -.1);
+    podStripe.scale.set(.25, .045, 1.06);
     const fender = mesh(new THREE.SphereGeometry(1, lite ? 10 : 18, 10), bodyLight, chassis, x, .83, 1.42);
     fender.scale.set(.44, .2, .66);
     box(chassis, .28, .08, .75, dark, x * .62, 1.31, -1.61);
@@ -510,6 +538,9 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
         const center = mesh(new THREE.CylinderGeometry(.15, .15, .51, 16), body, rolling,
           Math.sign(x) * .04);
         center.rotation.z = Math.PI / 2;
+        const wheelRing = mesh(new THREE.TorusGeometry(.29, .045, 6, 18), highlight, rolling,
+          Math.sign(x) * .29);
+        wheelRing.rotation.y = Math.PI / 2;
       }
       wheels.push({ mount, rolling, front: z > 0 });
     }
@@ -534,12 +565,19 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   driver.add(head);
   const helmetShell = mesh(new THREE.SphereGeometry(.79, lite ? 12 : 28, lite ? 10 : 20), helmet, head, 0, 2.55, -.67);
   helmetShell.scale.set(1.06, .94, 1.01);
+  const helmetBand = mesh(new THREE.SphereGeometry(1, 16, 12), accent, head, 0, 2.91, -.66);
+  helmetBand.scale.set(.73, .075, .73);
+  const helmetTail = mesh(new THREE.SphereGeometry(1, 12, 8), highlight, head, 0, 2.59, -1.45);
+  helmetTail.scale.set(.22, .26, .05);
   const face = mesh(new THREE.SphereGeometry(.65, lite ? 12 : 24, lite ? 8 : 16), skin, head, 0, 2.43, -.18);
   face.scale.set(1.0, .74, .40);
+  const visor = mesh(new THREE.SphereGeometry(1, 16, 10), dark, head, 0, 2.77, .04);
+  visor.scale.set(.68, .08, .16);
   for (const x of [-.25, .25]) {
     const e = mesh(new THREE.SphereGeometry(.12, 12, 10), eye, head, x, 2.54, .075);
     e.scale.set(.83, 1.5, .52);
     if (!lite) {
+      mesh(new THREE.SphereGeometry(.035, 8, 6), white, head, x - .03, 2.59, .14);
       const cheek = mesh(new THREE.SphereGeometry(.10, 10, 8), makeMaterial(0xf69caa, .7), head, x * 1.9, 2.3, .06);
       cheek.scale.set(1.15, .52, .42);
     }
@@ -582,6 +620,11 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
       mesh(new THREE.SphereGeometry(.19, 12, 8), lamp, chassis, x, .92, 2.13);
       mesh(new THREE.SphereGeometry(.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff506d }), chassis, x, .82, -2.20);
     }
+    box(chassis, .96, .11, .08, highlight, 0, 1.09, -2.16);
+    for (const x of [-.82, .82]) {
+      const exhaust = mesh(new THREE.CylinderGeometry(.22, .26, .36, 12), rim, chassis, x, .68, -2.29);
+      exhaust.rotation.x = Math.PI / 2;
+    }
   }
   const flameMat = new THREE.MeshBasicMaterial({
     color: 0x60eaff, transparent: true, opacity: .9, depthWrite: false,
@@ -604,14 +647,14 @@ function setup3D() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.52;
+  renderer.toneMappingExposure = 1.05;
   camera = new THREE.PerspectiveCamera(66, window.innerWidth / window.innerHeight, .15, 640);
   previewRenderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: true, powerPreference: 'low-power' });
   previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
   previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
   previewScene = new THREE.Scene();
-  previewScene.add(new THREE.HemisphereLight(0xffffff, 0x7c9db7, 3));
-  const previewLight = new THREE.DirectionalLight(0xffffff, 2.2);
+  previewScene.add(new THREE.HemisphereLight(0xffffff, 0x7c9db7, 1.8));
+  const previewLight = new THREE.DirectionalLight(0xffffff, 1.8);
   previewLight.position.set(-3, 9, 7);
   previewScene.add(previewLight);
   previewCamera = new THREE.PerspectiveCamera(26, 1, .1, 100);
@@ -642,8 +685,8 @@ function buildWorld() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(selectedTrack.sky);
   scene.fog = new THREE.FogExp2(selectedTrack.fog, .0023);
-  scene.add(new THREE.HemisphereLight(0xe5faff, 0x6c9b61, 2.2));
-  const sunlight = new THREE.DirectionalLight(0xffefc8, 2.3);
+  scene.add(new THREE.HemisphereLight(0xe5faff, 0x6c9b61, 1.6));
+  const sunlight = new THREE.DirectionalLight(0xffefc8, 1.8);
   sunlight.position.set(-90, 150, -40);
   scene.add(sunlight);
   createCurve();
@@ -1027,6 +1070,7 @@ async function connectRoom(action) {
 }
 
 function resetRace(online = false, startAt = 0) {
+  audio.start();
   game = freshGame();
   onlineRace = online;
   if (!online) raceQuestions = questionBank;
@@ -1054,6 +1098,10 @@ function resetRace(online = false, startAt = 0) {
   earnedPower = null; activeQuiz = null; nextQuizDistance = 180;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
   $('#quizPanel').hidden = true;
+  $('#quizBackdrop').hidden = true;
+  document.body.classList.remove('quiz-active');
+  ui.leaderboard.hidden = true;
+  $('#leaderboardButton').setAttribute('aria-expanded', 'false');
   $('#learningScore').hidden = !learningEnabled;
   lastLeaderboardUpdate = 0;
   opponents.forEach(kart => { kart.visible = !online; });
@@ -1084,6 +1132,7 @@ function pauseRace() {
 
 function finishRace() {
   game.mode = 'finished';
+  audio.cue('finish');
   if (onlineRace) network.send({ type: 'finish' });
   const place = rank();
   const suffix = place === 1 ? 'st' : place === 2 ? 'nd' : place === 3 ? 'rd' : 'th';
@@ -1109,6 +1158,8 @@ function returnToMenu() {
   ui.pauseMenu.hidden = true;
   ui.results.hidden = true;
   $('#quizPanel').hidden = true;
+  $('#quizBackdrop').hidden = true;
+  document.body.classList.remove('quiz-active');
   activeQuiz = null;
   ui.hud.hidden = true;
   ui.touch.hidden = true;
@@ -1131,11 +1182,12 @@ function showQuiz() {
   const index = quizCursor % raceQuestions.length;
   const question = raceQuestions[index];
   activeQuiz = { index, deadline: performance.now() + 20000 };
-  if (!onlineRace) {
-    game.mode = 'quiz';
-    Object.keys(keys).forEach(key => { keys[key] = false; });
-    resetTouchSteering();
-  }
+  game.mode = 'quiz';
+  game.speed = 0;
+  Object.keys(keys).forEach(key => { keys[key] = false; });
+  resetTouchSteering();
+  if (onlineRace) network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
+    speed: 0, boost: false, shield: shieldTime > 0 });
   $('#quizQuestion').textContent = question.question;
   $('#quizOptions').replaceChildren(...question.options.map((option, choice) => {
     const button = document.createElement('button');
@@ -1146,6 +1198,8 @@ function showQuiz() {
   }));
   $('#quizTimer').textContent = onlineRace ? '20 วินาที' : 'หยุดเวลาแข่งชั่วคราว';
   $('#quizPanel').hidden = false;
+  $('#quizBackdrop').hidden = false;
+  document.body.classList.add('quiz-active');
   $('#quizOptions button')?.focus();
 }
 
@@ -1155,15 +1209,18 @@ function answerQuiz(choice) {
   if (choice !== null) {
     quizAttempted++;
     if (choice === question.answer) {
+      audio.cue('correct');
       quizCorrect++;
       earnedPower = ['nitro', 'shield', 'pulse'][(quizCorrect - 1) % 3];
       toast('ถูกต้อง! ได้พลังพิเศษ กด BOOST เพื่อใช้ ✨', 2.4);
-    } else toast(`ยังไม่ถูก · คำตอบคือ ${question.options[question.answer]}`, 2.4);
-  } else toast('ข้ามคำถามแล้ว', 1.2);
+    } else { audio.cue('wrong'); toast(`ยังไม่ถูก · คำตอบคือ ${question.options[question.answer]}`, 2.4); }
+  } else { audio.cue('wrong'); toast('ข้ามคำถามแล้ว', 1.2); }
   quizCursor++;
   nextQuizDistance = Math.max(nextQuizDistance + 300, game.distance + 240);
   activeQuiz = null;
   $('#quizPanel').hidden = true;
+  $('#quizBackdrop').hidden = true;
+  document.body.classList.remove('quiz-active');
   if (game.mode === 'quiz') game.mode = 'racing';
   updateHud();
 }
@@ -1240,12 +1297,14 @@ function useBoost() {
       toast('ปล่อยคลื่นพลัง! ⚡');
     }
     if (onlineRace && (selectedMode === 'item' || learningEnabled)) network.send({ type: 'item', item });
+    audio.cue('boost');
     updateHud();
     return;
   }
   if (game.mode !== 'racing' || game.boostTime > 0 || game.driftCharge < 55) return;
   game.driftCharge -= 55;
   game.boostTime = 2.4;
+  audio.cue('boost');
   toast('TURBO BOOST! ⚡', 1.1);
 }
 
@@ -1263,20 +1322,24 @@ function update(dt) {
     if (label !== previousCountdown) {
       ui.countdown.textContent = label;
       previousCountdown = label;
+      audio.cue(label === 'GO!' ? 'go' : 'tick');
     }
     if (game.countdown <= -.55) {
       game.mode = 'racing';
       ui.countdown.hidden = true;
+      if (!keys.gas) toast(touchLayout() ? 'กด GO ค้างเพื่อออกตัว' : 'กด ↑ หรือ W ค้างเพื่อออกตัว', 2.4);
     }
+  } else if (game.mode === 'quiz') {
+    if (onlineRace) game.raceTime += dt;
   } else if (game.mode === 'racing') {
     game.raceTime += dt;
     shieldTime = Math.max(0, shieldTime - dt);
     pulseTime = Math.max(0, pulseTime - dt);
-    const accelerating = keys.gas || touchLayout();
+    const accelerating = keys.gas;
     const steer = clamp(Number(keys.right) - Number(keys.left) + touchSteer, -1, 1);
     const drifting = keys.drift && Math.abs(steer) > 0 && game.speed > 13;
     const cap = game.boostTime > 0 ? MAX_SPEED * 1.3 : MAX_SPEED;
-    game.speed += ((accelerating ? keys.gas ? 27 : 23 : -24) -
+    game.speed += ((accelerating ? 27 : -24) -
       game.speed * (game.boostTime > 0 ? .03 : .08)) * dt;
     if (pulseTime > 0) game.speed -= 26 * dt;
     if (game.boostTime > 0) {
@@ -1413,6 +1476,7 @@ function drawMinimap() {
 function frame() {
   const dt = Math.min(.05, clock.getDelta());
   update(dt);
+  audio.update(game.speed, game.mode === 'racing' || game.mode === 'countdown', game.boostTime > 0);
   if (game.mode !== 'menu') drawMinimap();
   renderer.render(scene, camera);
   if (!ui.menu.hidden && previewRenderer) {
@@ -1432,6 +1496,7 @@ function keyToControl(key) {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (game.mode === 'racing' || game.mode === 'countdown') audio.start();
   if (event.key === 'Escape' && !$('#qrFullscreen').hidden) {
     $('#qrFullscreen').hidden = true;
     event.preventDefault(); return;
@@ -1476,6 +1541,7 @@ document.querySelectorAll('[data-control]').forEach((button) => {
   const control = button.dataset.control;
   button.addEventListener('pointerdown', (event) => {
     event.preventDefault();
+    audio.start();
     button.setPointerCapture(event.pointerId);
     pointerControls.set(event.pointerId, control);
     keys[control] = true;
@@ -1627,6 +1693,17 @@ $('#questionFile').addEventListener('change', async event => {
 });
 $('#learningToggle').addEventListener('change', event => { learningEnabled = event.target.checked; });
 $('#skipQuestion').addEventListener('click', () => answerQuiz(null));
+function updateSoundButton() {
+  const button = $('#soundButton');
+  button.textContent = audio.enabled ? '🔊' : '🔇';
+  button.setAttribute('aria-label', audio.enabled ? 'ปิดเสียง' : 'เปิดเสียง');
+  button.setAttribute('aria-pressed', String(audio.enabled));
+}
+$('#soundButton').addEventListener('click', () => { audio.toggle(); updateSoundButton(); });
+$('#leaderboardButton').addEventListener('click', () => {
+  ui.leaderboard.hidden = !ui.leaderboard.hidden;
+  $('#leaderboardButton').setAttribute('aria-expanded', String(!ui.leaderboard.hidden));
+});
 $('#garage').addEventListener('click', event => {
   const swatch = event.target.closest('[data-part][data-color]');
   const decal = event.target.closest('[data-decal]');
@@ -1673,6 +1750,9 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   resizePreview();
+  if (game.mode === 'racing' || game.mode === 'countdown' || game.mode === 'paused') {
+    ui.touch.hidden = !touchLayout();
+  }
 });
 
 try {
@@ -1681,6 +1761,7 @@ try {
     if (savedName && savedName !== 'Rider') $('#playerName').value = savedName;
   } catch { /* Storage is optional. */ }
   renderChoices();
+  updateSoundButton();
   setup3D();
   frame();
   const sharedCode = new URLSearchParams(location.search).get('room')?.trim().toUpperCase();
