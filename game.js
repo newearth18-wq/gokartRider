@@ -1,10 +1,10 @@
 import * as THREE from './vendor/three.module.js';
-import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js';
-import { settleRoadEdge } from './driving.mjs';
+import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=8-1';
+import { settleRoadEdge } from './driving.mjs?v=8-1';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
-import { GameAudio } from './audio.js';
+import { GameAudio } from './audio.js?v=8-1';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
