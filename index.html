@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=7-0" />
+    <link rel="stylesheet" href="style.css?v=8-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -47,6 +47,8 @@
           <div id="studentJoinBanner" class="student-join-banner" hidden><strong>ห้อง <span id="studentRoomCode"></span></strong><span>เลือกนักขับและแต่งรถก่อนเข้าห้อง</span><button id="studentJoinButton" type="button">เข้าห้องนี้ →</button></div>
           <div class="selection-title"><strong>นักขับ</strong><span id="characterCaption">โนวา · นักซิ่งดาวรุ่ง</span></div>
           <div id="characterChoices" class="character-choices" role="group" aria-label="เลือกนักขับ"></div>
+          <div class="selection-title"><strong>รถแข่ง</strong><span id="kartCaption">คอมเม็ต · สมดุลทุกทาง</span></div>
+          <div id="kartChoices" class="kart-choices" role="group" aria-label="เลือกรถแข่ง"></div>
           <div class="garage-preview"><canvas id="garagePreview" aria-label="ตัวอย่างรถและนักขับสามมิติ"></canvas><span>ตัวอย่าง 3D</span></div>
           <div class="garage-title"><strong>แต่งรถและนักขับ</strong><span>เลือกแล้วเห็นผลทันที</span></div>
           <div id="garage" class="garage" aria-label="ปรับแต่งรถและนักขับ">
@@ -119,6 +121,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=7-0"></script>
+    <script type="module" src="game.js?v=8-0"></script>
   </body>
 </html>

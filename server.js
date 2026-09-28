@@ -9,7 +9,8 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_PLAYERS = 50;
 const VALID_TRACKS = new Set(['meadow', 'canyon', 'snow', 'harbor']);
-const VALID_CHARACTERS = new Set(['nova', 'poppy', 'riko', 'momo', 'luna', 'mint']);
+const VALID_CHARACTERS = new Set(['nova', 'poppy', 'riko', 'momo', 'luna', 'mint', 'bibi', 'pixel', 'koko', 'sol']);
+const VALID_MODELS = new Set(['comet', 'rocket', 'grip', 'flash']);
 const ROOT = __dirname;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const rooms = new Map();
@@ -34,8 +35,8 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  return [...room.players.values()].map(({ id, name, character, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }) =>
-    ({ id, name, character, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }));
+  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }) =>
+    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }));
 }
 
 function roomStatus(room) {
@@ -96,6 +97,7 @@ function join(client, message) {
   }
   client.name = cleanName(message.name);
   client.character = VALID_CHARACTERS.has(message.character) ? message.character : 'nova';
+  client.model = VALID_MODELS.has(message.model) ? message.model : 'comet';
   client.kart = /^#[0-9a-fA-F]{6}$/.test(message.kart || '') ? message.kart : '#258def';
   client.helmet = /^#[0-9a-fA-F]{6}$/.test(message.helmet || '') ? message.helmet : '#258def';
   client.rim = /^#[0-9a-fA-F]{6}$/.test(message.rim || '') ? message.rim : '#e3edf6';
@@ -132,7 +134,7 @@ function handleMessage(client, message) {
     const maxDistance = elapsed * 100 + 60;
     client.distance = Math.min(Math.max(client.distance - 2, distance), maxDistance);
     client.lateral = Math.max(-20, Math.min(20, lateral));
-    client.speed = Math.max(0, Math.min(90, speed));
+    client.speed = Math.max(0, Math.min(105, speed));
     client.boost = Boolean(message.boost);
     client.shield = Boolean(message.shield);
     return;

@@ -36,6 +36,18 @@ export const CHARACTERS = [
   { id: 'momo', name: 'โมโม่', title: 'หมีน้อยจอมพลัง', suit: 0xe4f5f4, helmet: 0xf5f7f0, accent: 0x82dbe2, kart: 0x81d9e2, style: 'bear', face: '🐻' },
   { id: 'luna', name: 'ลูน่า', title: 'นักเดินทางราตรี', suit: 0x8067e8, helmet: 0x917cf5, accent: 0xffe680, kart: 0x8368e9, style: 'ears', face: '🌙' },
   { id: 'mint', name: 'มินต์', title: 'สปีดสเตอร์สีเขียว', suit: 0x41cbb2, helmet: 0x51d9aa, accent: 0xe7fff1, kart: 0x39c6a0, style: 'cap', face: '🍀' },
+  { id: 'bibi', name: 'บีบี', title: 'กระต่ายจอมกระโดด', suit: 0xffa94c, helmet: 0xffb76b, accent: 0xfff1c8, kart: 0xffaa50, style: 'rabbit', face: '🐰' },
+  { id: 'pixel', name: 'พิกเซล', title: 'หุ่นยนต์นักประดิษฐ์', suit: 0x40b9ed, helmet: 0x4fd5ed, accent: 0xe1fcff, kart: 0x4dd8ec, style: 'robot', face: '🤖' },
+  { id: 'koko', name: 'โคโค่', title: 'ไดโนเสาร์สายลุย', suit: 0x72c465, helmet: 0x8dde6b, accent: 0xe5ffc8, kart: 0x7bce6c, style: 'dino', face: '🦖' },
+  { id: 'sol', name: 'โซล', title: 'นักแข่งแสงอาทิตย์', suit: 0xff6565, helmet: 0xff825b, accent: 0xffeb92, kart: 0xff735e, style: 'sun', face: '☀️' },
+];
+
+// Performance numbers are local driving characteristics. All racers share the same track and laps.
+export const KARTS = [
+  { id: 'comet', name: 'คอมเม็ต', icon: '🏎️', skill: 'สมดุลทุกทาง', acceleration: 1, topSpeed: 1, steering: 1, boost: 1, style: 'sport' },
+  { id: 'rocket', name: 'ร็อกเก็ต', icon: '🚀', skill: 'ทางตรงเร็ว · ไนโตรนาน', acceleration: 1.06, topSpeed: 1.13, steering: .91, boost: 1.35, style: 'rocket' },
+  { id: 'grip', name: 'กริปเปอร์', icon: '🛞', skill: 'เข้าโค้งนิ่ง · คืนตัวไว', acceleration: .98, topSpeed: .96, steering: 1.24, boost: .9, style: 'grip' },
+  { id: 'flash', name: 'แฟลช', icon: '⚡', skill: 'ออกตัวไว · ดริฟต์ชาร์จเร็ว', acceleration: 1.23, topSpeed: .98, steering: 1.06, boost: 1, style: 'flash' },
 ];
 
 export const MAX_PLAYERS = 50;

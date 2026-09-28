@@ -53,9 +53,11 @@ test('50 riders share a room and the 51st is rejected', { timeout: 30000 }, asyn
     const url = `ws://127.0.0.1:${port}/race`;
     const host = await open(url); clients.push(host);
     const first = waitMessage(host, data => data.type === 'welcome');
-    host.send(JSON.stringify({ type: 'create', name: 'Host', track: 'snow' }));
+    host.send(JSON.stringify({ type: 'create', name: 'Host', track: 'snow', character: 'pixel', model: 'rocket' }));
     const welcome = await first;
     assert.equal(welcome.track, 'snow');
+    assert.equal(welcome.players[0].character, 'pixel');
+    assert.equal(welcome.players[0].model, 'rocket');
     for (let i = 1; i < 50; i++) {
       const ws = await open(url); clients.push(ws);
       const next = waitMessage(ws, data => data.type === 'welcome');

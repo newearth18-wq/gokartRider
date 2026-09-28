@@ -1,5 +1,6 @@
 import * as THREE from './vendor/three.module.js';
-import { TRACKS, CHARACTERS, MAX_PLAYERS, RACE_LAPS } from './config.js';
+import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js';
+import { settleRoadEdge } from './driving.mjs';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
@@ -58,6 +59,7 @@ let toastUntil = 0;
 let previousCountdown = '';
 let selectedTrack = TRACKS[0];
 let selectedCharacter = CHARACTERS[0];
+let selectedKart = KARTS[0];
 const PAINTS = [0x188bef, 0xf75e6c, 0xffc52f, 0x58d2a0, 0x9a75ed, 0xf8f9ff, 0x1b2947];
 const HELMETS = [0x258def, 0xff72aa, 0xffc33d, 0x51d9aa, 0x9478f5, 0xf7f7f1, 0x25385c];
 const RIMS = [0xe3edf6, 0xffd84b, 0x5deaff, 0xff7aa8, 0xa58bff, 0x34394b];
@@ -69,6 +71,7 @@ try {
   if (HELMETS.includes(saved.helmet)) appearance.helmet = saved.helmet;
   if (RIMS.includes(saved.rim)) appearance.rim = saved.rim;
   if (DECALS.some(item => item.id === saved.decal)) appearance.decal = saved.decal;
+  selectedKart = KARTS.find(kart => kart.id === saved.model) || KARTS[0];
 } catch { /* Private browsing can disable storage. */ }
 let touchSteer = 0;
 let steeringPointer = null;
@@ -529,6 +532,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   const highlight = makeMaterial(0xffdf45, .22, .08);
   const white = makeMaterial(0xffffff, .18);
   const eye = makeMaterial(0x14233b, .13);
+  const model = KARTS.find(kart => kart.id === look.model) || KARTS[0];
 
   box(chassis, 2.6, .28, 3.7, dark, 0, .64, 0);
   const shell = mesh(new THREE.SphereGeometry(1, lite ? 12 : 24, lite ? 8 : 14), body, chassis, 0, .98, .1);
@@ -557,6 +561,30 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   box(chassis, 1.52, .7, 1.08, dark, 0, 1.20, -.52);
   box(chassis, 2.6, .13, .55, accent, 0, 1.5, -2.02);
   box(chassis, 2.3, .15, .22, accent, 0, 1.53, .78);
+  if (model.style === 'rocket') {
+    const fin = makeMaterial(0xffcf54, .24, .2);
+    box(chassis, 2.9, .14, .62, fin, 0, 1.72, -1.9);
+    for (const x of [-1.24, 1.24]) {
+      const wing = mesh(new THREE.ConeGeometry(.34, 1.85, 4), bodyLight, chassis, x, 1.02, -.95);
+      wing.rotation.x = Math.PI / 2;
+    }
+    const noseCone = mesh(new THREE.ConeGeometry(.47, 1.05, 12), accent, chassis, 0, 1.06, 2.45);
+    noseCone.rotation.x = Math.PI / 2;
+  } else if (model.style === 'grip') {
+    for (const x of [-1.4, 1.4]) {
+      box(chassis, .42, .30, 1.25, accent, x, .76, 1.05);
+      box(chassis, .36, .15, 1.0, highlight, x, 1.0, 1.05);
+    }
+    box(chassis, 3.3, .22, .42, bodyLight, 0, 1.16, -1.95);
+  } else if (model.style === 'flash') {
+    const flash = makeMaterial(0xffe852, .25);
+    for (const x of [-1, 1]) {
+      const blade = box(chassis, .18, .12, 1.35, flash, x, 1.45, .62);
+      blade.rotation.y = x * .28;
+    }
+    box(chassis, 2.8, .12, .42, flash, 0, 1.66, -2.05);
+    box(chassis, .56, .12, 1.04, flash, 0, 1.46, 1.24);
+  }
   const wheels = [];
   for (const x of [-1.62, 1.62]) {
     for (const z of [-1.35, 1.42]) {
@@ -620,17 +648,28 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   }
   const smile = mesh(new THREE.TorusGeometry(.12, .025, 6, 16, Math.PI), eye, head, 0, 2.22, .072);
   smile.rotation.z = Math.PI;
-  if (character.style === 'bear' || character.style === 'ears' || character.style === 'fox') {
+  if (['bear', 'ears', 'fox', 'rabbit', 'dino'].includes(character.style)) {
     for (const x of [-.55, .55]) {
-      const ear = mesh(character.style === 'fox' ? new THREE.ConeGeometry(.27, .60, 12) :
+      const ear = mesh(['fox', 'dino'].includes(character.style) ? new THREE.ConeGeometry(.27, .60, 12) :
         new THREE.SphereGeometry(.27, 12, 10), helmet, head, x, 3.18, -.68);
-      if (character.style !== 'fox') ear.scale.y = .9;
+      if (character.style === 'rabbit') ear.scale.y = 2.0;
+      else if (character.style !== 'fox') ear.scale.y = .9;
     }
   } else if (character.style === 'buns') {
     for (const x of [-.72, .72]) mesh(new THREE.SphereGeometry(.32, 14, 12), helmet, head, x, 2.94, -.8);
   } else if (character.style === 'cap') {
     const brim = mesh(new THREE.SphereGeometry(1, 12, 8), accent, head, 0, 2.93, -.12);
     brim.scale.set(.72, .09, .43);
+  } else if (character.style === 'robot') {
+    const antenna = box(head, .08, .36, .08, accent, 0, 3.27, -.68);
+    antenna.rotation.z = .2;
+    mesh(new THREE.SphereGeometry(.14, 10, 8), highlight, head, 0, 3.52, -.68);
+    for (const x of [-.38, .38]) box(head, .15, .32, .16, accent, x, 2.54, -.6);
+  } else if (character.style === 'sun') {
+    for (const x of [-.38, 0, .38]) {
+      const ray = mesh(new THREE.ConeGeometry(.12, .46, 8), highlight, head, x, 3.25, -.68);
+      ray.rotation.z = x * -.35;
+    }
   } else {
     const stripe = mesh(new THREE.SphereGeometry(1, 12, 8), accent, head, 0, 3.21, -.67);
     stripe.scale.set(.12, .08, .69);
@@ -739,14 +778,15 @@ function buildWorld() {
   createRoad();
   createScenery();
   if (selectedMode === 'item') createItemPickups();
-  playerKart = createKart(appearance.paint, selectedCharacter, false, appearance);
+  playerKart = createKart(appearance.paint, selectedCharacter, false, { ...appearance, model: selectedKart.id });
   previewKart = playerKart.clone(true);
   previewKart.position.set(0, 0, 0);
   previewKart.rotation.y = -.3;
   previewScene.add(previewKart);
   opponents = AI_COLORS.map((color, i) => {
     const character = CHARACTERS[(i + 1) % CHARACTERS.length];
-    return createKart(color, character, true, { helmet: character.helmet, rim: 0xe3edf6, decal: 'stripe' });
+    return createKart(color, character, true, { helmet: character.helmet, rim: 0xe3edf6,
+      decal: 'stripe', model: KARTS[(i + 1) % KARTS.length].id });
   });
   opponents.forEach(kart => { kart.visible = false; });
   remoteKarts.clear();
@@ -802,7 +842,7 @@ function syncRemoteKarts(dt) {
       const character = CHARACTERS.find(entry => entry.id === player.character) || CHARACTERS[0];
       const helmet = /^#[0-9a-fA-F]{6}$/.test(player.helmet || '') ? Number.parseInt(player.helmet.slice(1), 16) : character.helmet;
       const rim = /^#[0-9a-fA-F]{6}$/.test(player.rim || '') ? Number.parseInt(player.rim.slice(1), 16) : 0xe3edf6;
-      kart = createKart(color, character, true, { helmet, rim, decal: player.decal || 'bolt' });
+      kart = createKart(color, character, true, { helmet, rim, decal: player.decal || 'bolt', model: player.model });
       kart.userData.distance = player.distance;
       kart.userData.lateral = player.lateral;
       remoteKarts.set(player.id, kart);
@@ -885,6 +925,9 @@ function renderChoices() {
   $('#trackChoices').innerHTML = TRACKS.map(track =>
     `<button type="button" class="track-choice ${track.id === selectedTrack.id ? 'active' : ''}" data-track="${track.id}" aria-pressed="${track.id === selectedTrack.id}"><span class="track-icon">${track.icon}</span><span><strong>${track.name}</strong><small>${track.subtitle}</small></span></button>`).join('');
   $('#characterCaption').textContent = `${selectedCharacter.name} · ${selectedCharacter.title}`;
+  $('#kartChoices').innerHTML = KARTS.map(kart =>
+    `<button type="button" class="kart-choice ${kart.id === selectedKart.id ? 'active' : ''}" data-kart="${kart.id}" aria-pressed="${kart.id === selectedKart.id}"><span>${kart.icon}</span><strong>${kart.name}</strong><small>${kart.skill}</small></button>`).join('');
+  $('#kartCaption').textContent = `${selectedKart.name} · ${selectedKart.skill}`;
   $('#trackCaption').textContent = selectedTrack.name;
   const colorGroups = [
     ['paint', PAINTS, '#paintChoices', 'สีรถ'],
@@ -1115,7 +1158,7 @@ async function connectRoom(action) {
   $('#createRoomButton').disabled = $('#joinRoomButton').disabled = true;
   try {
     const data = await network.connect(action, {
-      code, name: $('#playerName').value, character: selectedCharacter.id,
+      code, name: $('#playerName').value, character: selectedCharacter.id, model: selectedKart.id,
       kart: `#${appearance.paint.toString(16).padStart(6, '0')}`,
       helmet: `#${appearance.helmet.toString(16).padStart(6, '0')}`,
       rim: `#${appearance.rim.toString(16).padStart(6, '0')}`,
@@ -1367,7 +1410,7 @@ function useBoost() {
     const item = earnedPower || heldItem;
     if (earnedPower) earnedPower = null;
     else heldItem = null;
-    if (item === 'nitro') { game.boostTime = 3.5; toast('ไนโตรแรงเต็มพิกัด! 🔥'); }
+    if (item === 'nitro') { game.boostTime = 3.5 * selectedKart.boost; toast('ไนโตรแรงเต็มพิกัด! 🔥'); }
     else if (item === 'shield') { shieldTime = 7; toast('โล่ป้องกันพร้อม! 🛡️'); }
     else {
       pulseTime = 0;
@@ -1378,13 +1421,13 @@ function useBoost() {
       toast('ปล่อยคลื่นพลัง! ⚡');
     }
     if (onlineRace && (selectedMode === 'item' || learningEnabled)) network.send({ type: 'item', item });
-    audio.cue('boost');
+    audio.cue(item === 'shield' ? 'shield' : item === 'pulse' ? 'pulse' : 'boost');
     updateHud();
     return;
   }
   if (game.mode !== 'racing' || game.boostTime > 0 || game.driftCharge < 55) return;
   game.driftCharge -= 55;
-  game.boostTime = 2.4;
+  game.boostTime = 2.4 * selectedKart.boost;
   audio.cue('boost');
   toast('TURBO BOOST! ⚡', 1.1);
 }
@@ -1419,26 +1462,19 @@ function update(dt) {
     const accelerating = keys.gas;
     const steer = clamp(Number(keys.right) - Number(keys.left) + touchSteer, -1, 1);
     const drifting = keys.drift && Math.abs(steer) > 0 && game.speed > 13;
-    const cap = game.boostTime > 0 ? MAX_SPEED * 1.3 : MAX_SPEED;
-    game.speed += ((accelerating ? 27 : -24) -
+    const cap = MAX_SPEED * selectedKart.topSpeed * (game.boostTime > 0 ? 1.3 : 1);
+    game.speed += ((accelerating ? 27 * selectedKart.acceleration : -24) -
       game.speed * (game.boostTime > 0 ? .03 : .08)) * dt;
     if (pulseTime > 0) game.speed -= 26 * dt;
     if (game.boostTime > 0) {
       game.boostTime = Math.max(0, game.boostTime - dt);
       game.speed += 27 * dt;
     }
-    if (Math.abs(game.lateral) > ROAD_HALF - 1.6 && shieldTime <= 0) {
-      game.speed -= 33 * dt;
-      if (!game.offRoadNotified) {
-        toast('ออกนอกสนาม!');
-        game.offRoadNotified = true;
-      }
-    } else game.offRoadNotified = false;
     game.speed = clamp(game.speed, 0, cap);
     const oldDistance = game.distance;
     game.distance += game.speed * Math.cos(game.heading) * dt;
     game.steerMomentum = lerp(game.steerMomentum, steer, 1 - Math.exp(-dt * (drifting ? 7 : 10)));
-    const targetHeading = game.steerMomentum * (drifting ? .26 : .19) *
+    const targetHeading = game.steerMomentum * selectedKart.steering * (drifting ? .26 : .19) *
       (.48 + .52 * game.speed / MAX_SPEED) - clamp(game.lateral / ROAD_HALF, -1, 1) * .018;
     game.heading = lerp(game.heading, targetHeading, 1 - Math.exp(-dt * (drifting ? 3.7 : 6)));
     const targetSlide = game.speed * Math.sin(game.heading) * (drifting ? .49 : .43);
@@ -1449,16 +1485,16 @@ function update(dt) {
     const curveTurn = Math.atan2(before.x * after.z - before.z * after.x,
       before.x * after.x + before.z * after.z);
     game.heading = clamp(game.heading + curveTurn * (drifting ? .25 : .12), -.34, .34);
-    if (Math.abs(game.lateral) > ROAD_HALF) {
-      game.lateralVelocity += -Math.sign(game.lateral) * dt * 8;
-    }
-    if (Math.abs(game.lateral) > ROAD_HALF + .75) {
-      game.lateral = Math.sign(game.lateral) * (ROAD_HALF + .75);
-      game.lateralVelocity = -Math.sign(game.lateral) * Math.min(1.2, Math.abs(game.lateralVelocity) * .2);
-      if (shieldTime <= 0) game.speed *= .92;
-    }
+    const settled = settleRoadEdge(game.lateral, game.lateralVelocity, game.speed, steer, dt, ROAD_HALF);
+    game.lateral = settled.lateral;
+    game.lateralVelocity = settled.lateralVelocity;
+    game.speed = settled.speed;
+    if (Math.abs(game.lateral) > ROAD_HALF - 4.4 && !game.offRoadNotified) {
+      toast('ใกล้ขอบทาง · เลี้ยวกลับเข้าถนน', 1.3);
+      game.offRoadNotified = true;
+    } else if (Math.abs(game.lateral) < ROAD_HALF - 5.5) game.offRoadNotified = false;
     if (drifting) game.driftCharge = clamp(game.driftCharge +
-      dt * 38 * (.6 + game.speed / MAX_SPEED), 0, 100);
+      dt * 38 * (selectedKart.style === 'flash' ? 1.42 : 1) * (.6 + game.speed / MAX_SPEED), 0, 100);
     for (const opponent of onlineRace ? [] : game.ai) {
       opponent.slowTime = Math.max(0, (opponent.slowTime || 0) - dt);
       opponent.distance += opponent.speed * (opponent.slowTime > 0 ? .62 : 1) * dt *
@@ -1562,7 +1598,7 @@ function drawMinimap() {
 function frame() {
   const dt = Math.min(.05, clock.getDelta());
   update(dt);
-  audio.update(game.speed, game.mode === 'racing' || game.mode === 'countdown', game.boostTime > 0);
+  audio.update(game.speed, ['racing', 'countdown', 'quiz'].includes(game.mode), game.boostTime > 0);
   if (game.mode !== 'menu') drawMinimap();
   renderer.render(scene, camera);
   if (!ui.menu.hidden && previewRenderer) {
@@ -1685,6 +1721,13 @@ $('#characterChoices').addEventListener('click', event => {
   selectedCharacter = CHARACTERS.find(character => character.id === button.dataset.character) || CHARACTERS[0];
   buildWorld(); renderChoices();
 });
+$('#kartChoices').addEventListener('click', event => {
+  const button = event.target.closest('[data-kart]');
+  if (!button || game.mode !== 'menu') return;
+  selectedKart = KARTS.find(kart => kart.id === button.dataset.kart) || KARTS[0];
+  try { localStorage.setItem('turbo-trail-garage', JSON.stringify({ ...appearance, model: selectedKart.id })); } catch {}
+  buildWorld(); renderChoices();
+});
 
 let editorDraft = [];
 function editorStatus(message, error = false) {
@@ -1797,7 +1840,7 @@ $('#garage').addEventListener('click', event => {
   if (swatch) appearance[swatch.dataset.part] = Number(swatch.dataset.color);
   else if (decal) appearance.decal = decal.dataset.decal;
   else return;
-  try { localStorage.setItem('turbo-trail-garage', JSON.stringify(appearance)); } catch { /* Storage is optional. */ }
+  try { localStorage.setItem('turbo-trail-garage', JSON.stringify({ ...appearance, model: selectedKart.id })); } catch { /* Storage is optional. */ }
   buildWorld(); renderChoices();
 });
 $('#trackChoices').addEventListener('click', event => {
