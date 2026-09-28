@@ -154,3 +154,13 @@ body.quiz-active .topbar,body.quiz-active .hud,body.quiz-active .touch-controls{
 .quiz-reward{display:inline-block;margin-top:8px;padding:4px 9px;border-radius:999px;background:#ffe448;color:#1a315d;font-size:12px;font-weight:900}
 @media(max-width:700px){.power-card{top:93px;width:185px;padding:4px 6px;gap:5px}.power-card>span{font-size:17px}.power-card strong{font-size:10px}.power-card small{font-size:8px}.power-card button{font-size:8px;padding:4px 5px}}
 @media(max-width:480px) and (orientation:portrait){.power-card{top:183px;width:190px}}
+.impact-overlay{position:absolute;inset:0;z-index:6;pointer-events:none;display:grid;place-items:center;background:radial-gradient(circle at 50% 42%,#ffe95a50,transparent 44%);transition:opacity .15s}
+.impact-overlay[hidden]{display:none!important}
+.impact-card{display:grid;justify-items:center;gap:3px;max-width:80vw;transform:translateY(-13vh);padding:14px 28px;border:2px solid #fff9;border-radius:22px;background:#152c66dc;box-shadow:0 10px 45px #071943b0;animation:impact-pop .35s ease-out both}
+.impact-card span{font-size:clamp(38px,8vw,70px);line-height:1.1;filter:drop-shadow(0 4px 2px #172444)}
+.impact-card strong{font-size:clamp(17px,3vw,30px);font-weight:900;color:#fff;text-shadow:0 2px 5px #123}
+.impact-overlay.banana{background:repeating-conic-gradient(from 0deg at 50% 43%,#ffe94426 0 14deg,transparent 14deg 32deg)}
+.impact-overlay.ball{background:radial-gradient(circle at 50% 43%,#ff65706b,transparent 45%)}
+.impact-overlay.pie{background:radial-gradient(circle at 30% 28%,#fffcebba 0 4%,transparent 8%),radial-gradient(circle at 71% 57%,#fff9e9b0 0 6%,transparent 11%),radial-gradient(circle at 50% 45%,#ffdfec80,transparent 57%)}
+.impact-overlay.pulse{background:repeating-radial-gradient(circle at 50% 43%,#55e3ff44 0 5px,transparent 8px 35px)}
+@keyframes impact-pop{from{opacity:0;transform:translateY(-13vh) scale(.45) rotate(-14deg)}70%{opacity:1;transform:translateY(-13vh) scale(1.12) rotate(5deg)}to{transform:translateY(-13vh) scale(1) rotate(0)}}

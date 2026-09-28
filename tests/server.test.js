@@ -155,6 +155,18 @@ test('room broadcasts banana traps and targets ball and pie at another rider', {
     const ball = waitMessage(rider, data => data.type === 'item' && data.item === 'ball');
     host.send(JSON.stringify({ type: 'item', item: 'ball' }));
     assert.equal((await ball).targetId, friend.id);
+    const hit = waitMessage(host, data => data.type === 'snapshot' &&
+      data.players.some(player => player.id === friend.id && player.hitId === 7));
+    rider.send(JSON.stringify({ type: 'state', distance: 55, lateral: 1, speed: 8,
+      hitKind: 'ball', hitTime: 1.6, hitId: 7 }));
+    const hitPlayer = (await hit).players.find(player => player.id === friend.id);
+    assert.equal(hitPlayer.hitKind, 'ball');
+    assert.equal(hitPlayer.hitTime, 1.6);
+    const invalidHit = waitMessage(host, data => data.type === 'snapshot' &&
+      data.players.some(player => player.id === friend.id && player.hitId === 8));
+    rider.send(JSON.stringify({ type: 'state', distance: 55, lateral: 1, speed: 8,
+      hitKind: 'unknown', hitTime: 99, hitId: 8 }));
+    assert.equal((await invalidHit).players.find(player => player.id === friend.id).hitKind, null);
     await new Promise(resolve => setTimeout(resolve, 1050));
     const pie = waitMessage(rider, data => data.type === 'item' && data.item === 'pie');
     host.send(JSON.stringify({ type: 'item', item: 'pie' }));

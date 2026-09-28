@@ -12,6 +12,7 @@ const VALID_TRACKS = new Set(['meadow', 'canyon', 'snow', 'harbor']);
 const VALID_CHARACTERS = new Set(['nova', 'poppy', 'riko', 'momo', 'luna', 'mint', 'bibi', 'pixel', 'koko', 'sol']);
 const VALID_MODELS = new Set(['comet', 'rocket', 'grip', 'flash', 'bubble', 'shark', 'hover']);
 const VALID_ITEMS = new Set(['pulse', 'shield', 'nitro', 'banana', 'ball', 'pie']);
+const VALID_HITS = new Set(['banana', 'ball', 'pie', 'pulse']);
 const ROOT = __dirname;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const rooms = new Map();
@@ -36,8 +37,8 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, finishedAt }) =>
-    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, finishedAt }));
+  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, finishedAt }) =>
+    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, finishedAt }));
 }
 
 function roomStatus(room) {
@@ -109,6 +110,8 @@ function join(client, message) {
   client.speed = 0;
   client.boost = client.shield = false;
   client.held = null;
+  client.hitKind = null;
+  client.hitTime = client.hitId = 0;
   client.finishedAt = null;
   client.room = room;
   room.players.set(client.id, client);
@@ -140,6 +143,9 @@ function handleMessage(client, message) {
     client.boost = Boolean(message.boost);
     client.shield = Boolean(message.shield);
     client.held = VALID_ITEMS.has(message.held) ? message.held : null;
+    client.hitKind = VALID_HITS.has(message.hitKind) && Number(message.hitTime) > 0 ? message.hitKind : null;
+    client.hitTime = client.hitKind ? Math.max(0, Math.min(3, Number(message.hitTime) || 0)) : 0;
+    client.hitId = Number.isSafeInteger(message.hitId) && message.hitId >= 0 ? message.hitId : 0;
     return;
   }
   if (message.type === 'item' && (room.mode === 'item' || room.learning) && room.state === 'racing') {

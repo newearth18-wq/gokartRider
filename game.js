@@ -4,7 +4,7 @@ import { settleRoadEdge, steerThroughCurve } from './driving.mjs?v=10-0';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
-import { GameAudio } from './audio.js?v=9-0';
+import { GameAudio } from './audio.js?v=11-0';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -104,8 +104,17 @@ let shieldTime = 0;
 let pulseTime = 0;
 let hitTime = 0;
 let hitKind = null;
+let hitId = 0;
+const HIT_DURATIONS = { banana: 2.5, ball: 2.1, pie: 2.5, pulse: 2.0 };
+const HIT_LABELS = {
+  banana: ['🍌', 'รถลื่น! บังคับยากชั่วคราว'],
+  ball: ['🏐', 'รถคว่ำ! รอพลิกกลับ'],
+  pie: ['🥧', 'โดนพาย! รถสตั๊น'],
+  pulse: ['⚡', 'เครื่องยนต์ดับชั่วคราว'],
+};
 let bananaTraps = [];
 let projectiles = [];
+let impactBursts = [];
 let lastLeaderboardUpdate = 0;
 let renderedRoomQr = '';
 let scannerStream = null;
@@ -842,7 +851,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   pulseRing.rotation.x = Math.PI / 2;
   pulseRing.visible = false;
   group.userData = { chassis, driver, head, arms, wheels, flames, shieldBubble, pulseRing, weaponMeshes,
-    modelStyle: model.style,
+    modelStyle: model.style, baseRotationX: 0, baseRotationY: 0, baseRotationZ: 0,
     waveTime: 0, lastDistance: 0, animationTime: 0 };
   scene.add(group);
   return group;
@@ -915,10 +924,12 @@ function buildWorld() {
   smoke = [];
   bananaTraps = [];
   projectiles = [];
+  impactBursts = [];
+  $('#impactOverlay').hidden = true;
   game = freshGame();
 }
 
-function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false, weapon = null) {
+function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false, weapon = null, effect = null) {
   const at = pose(distance);
   kart.position.copy(at.point).addScaledVector(at.right, lateral);
   const parts = kart.userData;
@@ -927,9 +938,27 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   kart.position.y += .16 + (parts.modelStyle === 'hover' ? .48 + Math.sin(parts.animationTime * 3.8) * .07 : 0) +
     Math.sin(parts.animationTime * (10 + speed * .24)) * .025 * motion;
   kart.rotation.y = Math.atan2(at.tangent.x, at.tangent.z) - heading;
-  parts.chassis.rotation.z = lerp(parts.chassis.rotation.z, -lean * .19, Math.min(1, dt * 9));
-  parts.chassis.rotation.x = lerp(parts.chassis.rotation.x, -motion * .025 - (boost ? .045 : 0), Math.min(1, dt * 5));
-  parts.chassis.rotation.y = lerp(parts.chassis.rotation.y, lean * (boost ? .09 : .15), Math.min(1, dt * 7));
+  parts.baseRotationZ = lerp(parts.baseRotationZ, -lean * .19, Math.min(1, dt * 9));
+  parts.baseRotationX = lerp(parts.baseRotationX, -motion * .025 - (boost ? .045 : 0), Math.min(1, dt * 5));
+  parts.baseRotationY = lerp(parts.baseRotationY, lean * (boost ? .09 : .15), Math.min(1, dt * 7));
+  const effectProgress = effect?.time > 0 ? 1 - effect.time / HIT_DURATIONS[effect.kind] : 0;
+  parts.chassis.rotation.set(parts.baseRotationX, parts.baseRotationY, parts.baseRotationZ);
+  if (effect?.time > 0) {
+    if (effect.kind === 'banana') {
+      parts.chassis.rotation.y += Math.PI * 2 * effectProgress;
+      parts.chassis.rotation.z += Math.sin(effectProgress * Math.PI * 5) * .3;
+      kart.position.addScaledVector(at.right, Math.sin(effectProgress * Math.PI * 5) * .35);
+    } else if (effect.kind === 'ball') {
+      parts.chassis.rotation.z += Math.PI * 2 * effectProgress;
+      kart.position.y += Math.sin(Math.PI * effectProgress) * 2.2;
+    } else if (effect.kind === 'pie') {
+      parts.chassis.rotation.x += Math.sin(parts.animationTime * 23) * .12 * (1 - effectProgress);
+      parts.chassis.rotation.z += Math.sin(parts.animationTime * 17) * .10 * (1 - effectProgress);
+    } else if (effect.kind === 'pulse') {
+      parts.chassis.rotation.z += Math.sin(parts.animationTime * 37) * .14 * (1 - effectProgress);
+      parts.pulseRing.visible = true;
+    }
+  }
   parts.driver.position.y = Math.sin(parts.animationTime * (6 + motion * 5)) * .055 * (motion + .25);
   parts.driver.rotation.z = lerp(parts.driver.rotation.z, -lean * .16, Math.min(1, dt * 7));
   parts.head.rotation.z = lerp(parts.head.rotation.z, lean * .14, Math.min(1, dt * 5));
@@ -946,11 +975,14 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   parts.shieldBubble.visible = shield;
   for (const [kind, object] of Object.entries(parts.weaponMeshes)) object.visible = weapon === kind;
   parts.waveTime = Math.max(0, parts.waveTime - dt);
-  parts.pulseRing.visible = parts.waveTime > 0;
+  parts.pulseRing.visible = parts.waveTime > 0 || effect?.kind === 'pulse' && effect.time > 0;
   if (parts.waveTime > 0) {
     const progress = 1 - parts.waveTime;
     parts.pulseRing.scale.setScalar(1 + progress * 4);
     parts.pulseRing.material.opacity = parts.waveTime * .75;
+  } else if (effect?.kind === 'pulse' && effect.time > 0) {
+    parts.pulseRing.scale.setScalar(1 + Math.sin(parts.animationTime * 24) * .18);
+    parts.pulseRing.material.opacity = .5 + Math.sin(parts.animationTime * 30) * .3;
   }
   return at;
 }
@@ -976,7 +1008,17 @@ function syncRemoteKarts(dt) {
     kart.userData.distance = Math.abs(player.distance - kart.userData.distance) > 70 ?
       player.distance : lerp(kart.userData.distance, player.distance, Math.min(1, dt * 9));
     kart.userData.lateral = lerp(kart.userData.lateral, player.lateral, Math.min(1, dt * 9));
-    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield, player.held);
+    if (player.hitId && player.hitId !== kart.userData.remoteHitId) {
+      kart.userData.remoteHitId = player.hitId;
+      kart.userData.remoteHitKind = player.hitKind;
+      kart.userData.remoteHitTime = player.hitTime;
+      if (player.hitKind) spawnImpactBurst(player.distance, player.lateral, player.hitKind);
+    } else if (player.hitId === kart.userData.remoteHitId) {
+      kart.userData.remoteHitTime = Math.min(kart.userData.remoteHitTime || 0, player.hitTime || 0);
+    }
+    kart.userData.remoteHitTime = Math.max(0, (kart.userData.remoteHitTime || 0) - dt);
+    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield, player.held,
+      { kind: kart.userData.remoteHitKind, time: kart.userData.remoteHitTime });
   }
   for (const [id, kart] of remoteKarts) {
     if (active.has(id)) continue;
@@ -1324,9 +1366,12 @@ function resetRace(online = false, startAt = 0) {
   pointerControls.clear();
   resetTouchSteering();
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
-  hitTime = 0; hitKind = null;
+  hitTime = 0; hitKind = null; hitId = 0;
   for (const effect of [...bananaTraps, ...projectiles]) scene.remove(effect.mesh);
   bananaTraps = []; projectiles = [];
+  for (const burst of impactBursts) scene.remove(burst.group);
+  impactBursts = [];
+  $('#impactOverlay').hidden = true;
   earnedPower = null; activeQuiz = null; nextQuizDistance = FIRST_QUIZ_DISTANCE;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
   $('#quizPanel').hidden = true;
@@ -1420,7 +1465,8 @@ function showQuiz() {
   Object.keys(keys).forEach(key => { keys[key] = false; });
   resetTouchSteering();
   if (onlineRace) network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
-    speed: 0, boost: false, shield: shieldTime > 0, held: earnedPower || heldItem });
+    speed: 0, boost: false, shield: shieldTime > 0, held: earnedPower || heldItem,
+    hitKind, hitTime, hitId });
   $('#quizQuestion').textContent = question.question;
   $('#quizReward').textContent = `ตอบถูกได้ ${POWERS[reward].icon} ${POWERS[reward].name}`;
   $('#quizOptions').replaceChildren(...question.options.map((option, choice) => {
@@ -1568,6 +1614,54 @@ function removeWeapon(effect) {
   });
 }
 
+function spawnImpactBurst(distance, lateral, kind) {
+  const color = { banana: 0xffe331, ball: 0xff6878, pie: 0xfff2dd, pulse: 0x52e7ff }[kind] || 0xffffff;
+  const group = new THREE.Group();
+  group.position.copy(weaponPosition(distance, lateral, 1.5));
+  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .85, depthWrite: false });
+  const ring = mesh(new THREE.TorusGeometry(1.3, .13, 6, 24), material, group);
+  ring.rotation.x = Math.PI / 2;
+  for (let i = 0; i < 9; i++) {
+    const angle = i * Math.PI * 2 / 9;
+    mesh(new THREE.SphereGeometry(.19, 6, 5), material, group,
+      Math.cos(angle) * 1.2, Math.sin(angle) * 1.2, 0);
+  }
+  scene.add(group);
+  impactBursts.push({ group, age: 0, material });
+}
+
+function updateImpactBursts(dt) {
+  for (let i = impactBursts.length - 1; i >= 0; i--) {
+    const burst = impactBursts[i];
+    burst.age += dt;
+    burst.group.scale.setScalar(1 + burst.age * 2.6);
+    burst.material.opacity = Math.max(0, .85 * (1 - burst.age / .7));
+    if (burst.age > .7) {
+      burst.group.traverse(object => object.geometry?.dispose());
+      burst.material.dispose();
+      scene.remove(burst.group);
+      impactBursts.splice(i, 1);
+    }
+  }
+}
+
+function updateImpactOverlay() {
+  const overlay = $('#impactOverlay');
+  overlay.hidden = game.mode !== 'racing' || hitTime <= 0;
+  if (overlay.hidden) return;
+  overlay.className = `impact-overlay ${hitKind}`;
+  $('#impactIcon').textContent = HIT_LABELS[hitKind][0];
+  $('#impactLabel').textContent = HIT_LABELS[hitKind][1];
+  overlay.style.opacity = String(Math.min(1, hitTime * 2));
+}
+
+function applyAiHit(ai, kind) {
+  ai.hitKind = kind;
+  ai.hitTime = HIT_DURATIONS[kind];
+  ai.slowTime = ai.hitTime;
+  spawnImpactBurst(ai.distance, ai.lateral, kind);
+}
+
 function weaponHit(kind) {
   if (shieldTime > 0) {
     toast('เกราะป้องกันรับการโจมตี! 🛡️');
@@ -1575,10 +1669,13 @@ function weaponHit(kind) {
     return;
   }
   hitKind = kind;
-  hitTime = kind === 'pie' ? 2.0 : kind === 'banana' ? 1.7 : 1.3;
-  game.speed *= kind === 'banana' ? .35 : .55;
-  toast(kind === 'banana' ? 'ลื่นเปลือกกล้วย! 🍌' : kind === 'pie' ? 'โดนพายครีม! 🥧' : 'โดนลูกบอลเด้ง! 🏐', 1.8);
-  audio.cue('hit');
+  hitTime = HIT_DURATIONS[kind];
+  hitId++;
+  game.boostTime = 0;
+  game.speed *= kind === 'ball' ? .24 : kind === 'pie' ? .12 : kind === 'pulse' ? .18 : .58;
+  spawnImpactBurst(game.distance, game.lateral, kind);
+  audio.cue(kind === 'ball' ? 'crash' : kind === 'banana' ? 'skid' : kind === 'pie' ? 'stun' : 'stall');
+  updateImpactOverlay();
 }
 
 function handleWeaponEvent(event) {
@@ -1611,8 +1708,11 @@ function updateWeapons(dt) {
         Math.abs(game.distance - trap.distance) < 2.5 && Math.abs(game.lateral - trap.lateral) < 2.1) {
       weaponHit('banana');
       removeWeapon(trap); bananaTraps.splice(i, 1);
-    } else if (!onlineRace && game.ai.some(ai => Math.abs(ai.distance - trap.distance) < 2.5 &&
-        Math.abs(ai.lateral - trap.lateral) < 2.1 && (ai.slowTime = 2.5))) {
+    } else if (!onlineRace && game.ai.some(ai => {
+      if (Math.abs(ai.distance - trap.distance) >= 2.5 || Math.abs(ai.lateral - trap.lateral) >= 2.1) return false;
+      applyAiHit(ai, 'banana');
+      return true;
+    })) {
       removeWeapon(trap); bananaTraps.splice(i, 1);
     } else if (trap.age > 18) {
       removeWeapon(trap); bananaTraps.splice(i, 1);
@@ -1632,7 +1732,7 @@ function updateWeapons(dt) {
     shot.mesh.rotation.z += dt * 6;
     if (t >= 1) {
       if (shot.targetId === (onlineRace ? network.id : 'me') && game.mode === 'racing') weaponHit(shot.kind);
-      else if (!onlineRace && target) target.slowTime = shot.kind === 'pie' ? 3.5 : 2.4;
+      else if (!onlineRace && target) applyAiHit(target, shot.kind);
       removeWeapon(shot); projectiles.splice(i, 1);
     }
   }
@@ -1649,7 +1749,7 @@ function useBoost() {
       pulseTime = 0;
       playerKart.userData.waveTime = 1;
       if (!onlineRace) game.ai.forEach(ai => {
-        if (ai.distance > game.distance && ai.distance - game.distance < 120) ai.slowTime = 2.5;
+        if (ai.distance > game.distance && ai.distance - game.distance < 120) applyAiHit(ai, 'pulse');
       });
       toast('ปล่อยคลื่นพลัง! ⚡');
     } else if (item === 'banana' || item === 'ball' || item === 'pie') {
@@ -1706,29 +1806,34 @@ function update(dt) {
     shieldTime = Math.max(0, shieldTime - dt);
     pulseTime = Math.max(0, pulseTime - dt);
     hitTime = Math.max(0, hitTime - dt);
-    const accelerating = keys.gas;
+    const stunned = hitTime > 0 && (hitKind === 'pie' && hitTime > 1.05 ||
+      hitKind === 'ball' && hitTime > 1.0 || hitKind === 'pulse' && hitTime > .9);
+    const accelerating = keys.gas && !stunned;
     const steer = clamp(Number(keys.right) - Number(keys.left) + touchSteer, -1, 1);
-    const drifting = keys.drift && Math.abs(steer) > 0 && game.speed > 13;
+    const effectiveSteer = stunned ? 0 : hitTime > 0 && hitKind === 'banana' ? steer * .27 : steer;
+    const drifting = keys.drift && hitTime <= 0 && Math.abs(steer) > 0 && game.speed > 13;
     const cap = MAX_SPEED * selectedKart.topSpeed * (game.boostTime > 0 ? 1.3 : 1);
     game.speed += ((accelerating ? 27 * selectedKart.acceleration : -24) -
       game.speed * (game.boostTime > 0 ? .03 : .08)) * dt;
     if (pulseTime > 0) game.speed -= 26 * dt;
-    if (hitTime > 0) game.speed -= (hitKind === 'pie' ? 35 : 46) * dt;
+    if (hitTime > 0) game.speed -= (hitKind === 'banana' ? 17 : 54) * dt;
     if (game.boostTime > 0) {
       game.boostTime = Math.max(0, game.boostTime - dt);
       game.speed += 27 * dt;
     }
-    game.speed = clamp(game.speed, 0, cap);
+    game.speed = clamp(game.speed, 0, hitTime > 0 && hitKind !== 'banana' ? Math.min(cap, 12) : cap);
     const oldDistance = game.distance;
     game.distance += game.speed * Math.cos(game.heading) * dt;
     const before = pose(oldDistance).tangent;
     const after = pose(game.distance).tangent;
     const curveTurn = Math.atan2(before.x * after.z - before.z * after.x,
       before.x * after.x + before.z * after.z);
-    Object.assign(game, steerThroughCurve(game, steer, game.speed, selectedKart.steering,
+    Object.assign(game, steerThroughCurve(game, effectiveSteer, game.speed, selectedKart.steering,
       curveTurn, dt, drifting));
-    if (hitTime > 0) game.heading = clamp(game.heading + Math.sin(game.raceTime * 20) * .035 * dt,
-      -.65, .65);
+    if (hitTime > 0 && hitKind === 'banana') {
+      game.heading = clamp(game.heading + Math.sin(game.raceTime * 13) * .65 * dt, -.65, .65);
+      game.lateralVelocity += Math.sin(game.raceTime * 13) * 14 * dt;
+    }
     game.lateral += game.lateralVelocity * dt;
     const settled = settleRoadEdge(game.lateral, game.lateralVelocity, game.speed, steer, dt, ROAD_HALF);
     game.lateral = settled.lateral;
@@ -1742,7 +1847,10 @@ function update(dt) {
       dt * 38 * (selectedKart.style === 'flash' ? 1.42 : 1) * (.6 + game.speed / MAX_SPEED), 0, 100);
     for (const opponent of onlineRace ? [] : game.ai) {
       opponent.slowTime = Math.max(0, (opponent.slowTime || 0) - dt);
-      opponent.distance += opponent.speed * (opponent.slowTime > 0 ? .62 : 1) * dt *
+      opponent.hitTime = Math.max(0, (opponent.hitTime || 0) - dt);
+      const hitFactor = opponent.hitTime > 0 ?
+        { banana: .4, ball: .12, pie: .08, pulse: .15 }[opponent.hitKind] || .4 : 1;
+      opponent.distance += opponent.speed * hitFactor * dt *
         (1 + Math.sin(game.raceTime * .32 + opponent.phase) * .045);
       opponent.lateral += (Math.sin(game.raceTime * .5 + opponent.phase) * 3.2 -
         opponent.lateral) * dt * .26;
@@ -1776,7 +1884,7 @@ function update(dt) {
         lastNetworkState = 0;
         network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
           speed: game.speed, boost: game.boostTime > 0, shield: shieldTime > 0,
-          held: earnedPower || heldItem });
+          held: earnedPower || heldItem, hitKind: hitTime > 0 ? hitKind : null, hitTime, hitId });
       }
     }
     if (game.distance >= trackLength * RACE_LAPS) {
@@ -1788,11 +1896,13 @@ function update(dt) {
 
   const at = syncKart(playerKart, game.distance, game.lateral,
     game.steerMomentum * (keys.drift ? 1.5 : 1), game.boostTime > 0,
-    game.heading, game.speed, dt, shieldTime > 0, earnedPower || heldItem);
+    game.heading, game.speed, dt, shieldTime > 0, earnedPower || heldItem,
+    { kind: hitKind, time: hitTime });
   for (let i = 0; i < game.ai.length; i++) {
     const ai = game.ai[i];
     if (!onlineRace) syncKart(opponents[i], ai.distance, ai.lateral,
-      Math.sin(game.raceTime * .7 + ai.phase) * .15, false, 0, ai.speed, dt);
+      Math.sin(game.raceTime * .7 + ai.phase) * .15, false, 0, ai.speed, dt,
+      false, null, { kind: ai.hitKind, time: ai.hitTime });
   }
   if (onlineRace) syncRemoteKarts(dt);
   if (game.mode === 'racing' && keys.drift && game.speed > 13) {
@@ -1803,6 +1913,8 @@ function update(dt) {
     }
   }
   updateWeapons(dt);
+  updateImpactBursts(dt);
+  updateImpactOverlay();
   updateSmoke(dt);
   updateCamera(at, dt);
 }
