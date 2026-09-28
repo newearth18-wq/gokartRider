@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=10-0';
 import { settleRoadEdge, steerThroughCurve } from './driving.mjs?v=10-0';
+import { resolveKartCollision } from './collision.mjs?v=12-0';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
@@ -115,6 +116,8 @@ const HIT_LABELS = {
 let bananaTraps = [];
 let projectiles = [];
 let impactBursts = [];
+let crashCooldowns = new Map();
+let lastServerBumpId = 0;
 let lastLeaderboardUpdate = 0;
 let renderedRoomQr = '';
 let scannerStream = null;
@@ -130,6 +133,7 @@ function freshGame() {
     mode: 'menu', countdown: 3, distance: 0, speed: 0, lateral: 0,
     steerMomentum: 0, heading: 0, lateralVelocity: 0,
     driftCharge: 0, boostTime: 0, raceTime: 0,
+    crashShake: 0,
     offRoadNotified: false, cameraReady: false,
     ai: AI_COLORS.map((color, i) => ({
       color, distance: 9 + i * 6, lateral: [-3, 2, .1, -2, 3, -1, 1][i],
@@ -925,6 +929,7 @@ function buildWorld() {
   bananaTraps = [];
   projectiles = [];
   impactBursts = [];
+  crashCooldowns.clear();
   $('#impactOverlay').hidden = true;
   game = freshGame();
 }
@@ -943,6 +948,12 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   parts.baseRotationY = lerp(parts.baseRotationY, lean * (boost ? .09 : .15), Math.min(1, dt * 7));
   const effectProgress = effect?.time > 0 ? 1 - effect.time / HIT_DURATIONS[effect.kind] : 0;
   parts.chassis.rotation.set(parts.baseRotationX, parts.baseRotationY, parts.baseRotationZ);
+  parts.crashTime = Math.max(0, (parts.crashTime || 0) - dt);
+  if (parts.crashTime > 0) {
+    const strength = parts.crashTime / .55;
+    parts.chassis.rotation.z += Math.sin(parts.animationTime * 42) * .32 * strength;
+    parts.chassis.rotation.x += Math.sin(parts.animationTime * 33) * .17 * strength;
+  }
   if (effect?.time > 0) {
     if (effect.kind === 'banana') {
       parts.chassis.rotation.y += Math.PI * 2 * effectProgress;
@@ -1005,9 +1016,12 @@ function syncRemoteKarts(dt) {
       kart.userData.lateral = player.lateral;
       remoteKarts.set(player.id, kart);
     }
-    kart.userData.distance = Math.abs(player.distance - kart.userData.distance) > 70 ?
+    const nearPlayer = Math.abs(player.distance - game.distance) < 12 &&
+      Math.abs(player.lateral - game.lateral) < 7;
+    kart.userData.distance = nearPlayer || Math.abs(player.distance - kart.userData.distance) > 70 ?
       player.distance : lerp(kart.userData.distance, player.distance, Math.min(1, dt * 9));
-    kart.userData.lateral = lerp(kart.userData.lateral, player.lateral, Math.min(1, dt * 9));
+    kart.userData.lateral = nearPlayer ? player.lateral :
+      lerp(kart.userData.lateral, player.lateral, Math.min(1, dt * 9));
     if (player.hitId && player.hitId !== kart.userData.remoteHitId) {
       kart.userData.remoteHitId = player.hitId;
       kart.userData.remoteHitKind = player.hitKind;
@@ -1017,6 +1031,11 @@ function syncRemoteKarts(dt) {
       kart.userData.remoteHitTime = Math.min(kart.userData.remoteHitTime || 0, player.hitTime || 0);
     }
     kart.userData.remoteHitTime = Math.max(0, (kart.userData.remoteHitTime || 0) - dt);
+    if (player.bumpId && player.bumpId !== kart.userData.remoteBumpId) {
+      kart.userData.remoteBumpId = player.bumpId;
+      kart.userData.crashTime = .55;
+      spawnImpactBurst(player.distance, player.lateral, 'crash');
+    }
     syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield, player.held,
       { kind: kart.userData.remoteHitKind, time: kart.userData.remoteHitTime });
   }
@@ -1044,6 +1063,12 @@ function updateCamera(at, dt) {
   const desired = at.point.clone().add(behind)
     .addScaledVector(at.right, game.lateral - game.lateralVelocity * .08)
     .add(new THREE.Vector3(0, 5.9 - Math.min(.6, game.speed / MAX_SPEED * .6), 0));
+  game.crashShake = Math.max(0, game.crashShake - dt);
+  if (game.crashShake > 0) {
+    const shake = game.crashShake / .42;
+    desired.addScaledVector(at.right, Math.sin(game.raceTime * 82) * .34 * shake);
+    desired.y += Math.sin(game.raceTime * 67) * .22 * shake;
+  }
   const target = at.point.clone().addScaledVector(at.tangent, 19)
     .addScaledVector(at.right, game.lateral + game.steerMomentum * 2)
     .add(new THREE.Vector3(0, 1.8, 0));
@@ -1289,6 +1314,17 @@ function renderLobby(data) {
 function onNetworkMessage(data) {
   if (data.type === 'welcome' || data.type === 'room') renderLobby(data);
   if (data.type === 'snapshot') connectedPlayers = data.players || [];
+  if (data.type === 'collision' && onlineRace && game.mode === 'racing') {
+    game.distance = data.distance;
+    game.lateral = data.lateral;
+    game.speed = data.speed;
+    game.lateralVelocity *= .4;
+    if (data.bumpId > lastServerBumpId) {
+      lastServerBumpId = data.bumpId;
+      const rival = connectedPlayers.find(player => player.id === data.otherId);
+      if (rival) kartCrash(data.otherId, { ...rival, kart: remoteKarts.get(rival.id) }, data);
+    }
+  }
   if (data.type === 'finish' && data.id === network.id && game.mode === 'finished') {
     ui.resultPlace.textContent = `${data.place}/${connectedPlayers.length}`;
   }
@@ -1371,6 +1407,8 @@ function resetRace(online = false, startAt = 0) {
   bananaTraps = []; projectiles = [];
   for (const burst of impactBursts) scene.remove(burst.group);
   impactBursts = [];
+  crashCooldowns.clear();
+  lastServerBumpId = 0;
   $('#impactOverlay').hidden = true;
   earnedPower = null; activeQuiz = null; nextQuizDistance = FIRST_QUIZ_DISTANCE;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
@@ -1615,7 +1653,8 @@ function removeWeapon(effect) {
 }
 
 function spawnImpactBurst(distance, lateral, kind) {
-  const color = { banana: 0xffe331, ball: 0xff6878, pie: 0xfff2dd, pulse: 0x52e7ff }[kind] || 0xffffff;
+  const color = { banana: 0xffe331, ball: 0xff6878, pie: 0xfff2dd, pulse: 0x52e7ff,
+    crash: 0xffad32 }[kind] || 0xffffff;
   const group = new THREE.Group();
   group.position.copy(weaponPosition(distance, lateral, 1.5));
   const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .85, depthWrite: false });
@@ -1625,6 +1664,11 @@ function spawnImpactBurst(distance, lateral, kind) {
     const angle = i * Math.PI * 2 / 9;
     mesh(new THREE.SphereGeometry(.19, 6, 5), material, group,
       Math.cos(angle) * 1.2, Math.sin(angle) * 1.2, 0);
+    if (kind === 'crash') {
+      const spark = mesh(new THREE.ConeGeometry(.17, .68, 4), material, group,
+        Math.cos(angle) * 1.75, Math.sin(angle) * 1.75, 0);
+      spark.rotation.z = angle - Math.PI / 2;
+    }
   }
   scene.add(group);
   impactBursts.push({ group, age: 0, material });
@@ -1660,6 +1704,55 @@ function applyAiHit(ai, kind) {
   ai.hitTime = HIT_DURATIONS[kind];
   ai.slowTime = ai.hitTime;
   spawnImpactBurst(ai.distance, ai.lateral, kind);
+}
+
+function kartCrash(id, rival, result) {
+  if (result.impact < 6 || game.raceTime - (crashCooldowns.get(id) ?? -10) < .72) return;
+  crashCooldowns.set(id, game.raceTime);
+  const lateral = (game.lateral + rival.lateral) * .5;
+  spawnImpactBurst(game.distance, lateral, 'crash');
+  playerKart.userData.crashTime = .55;
+  if (rival.kart) rival.kart.userData.crashTime = .55;
+  game.crashShake = .42;
+  audio.cue('crash');
+  toast(result.axis === 'side' ? 'เฉี่ยวชน! รถสะบัด ⚡' : 'ชนรถคันหน้า! 💥', 1.1);
+}
+
+function resolveRaceCollisions(previous) {
+  const rivals = onlineRace ? connectedPlayers.filter(player => player.id !== network.id && !player.finishedAt)
+    .map(player => ({ ...player, kart: remoteKarts.get(player.id) })) :
+    game.ai.map((ai, i) => ({ ...ai, id: `ai-${i}`, kart: opponents[i] }));
+  for (const rival of rivals) {
+    const result = resolveKartCollision(previous, game, rival, ROAD_HALF);
+    if (!result) continue;
+    game.distance = result.distance;
+    game.lateral = result.lateral;
+    game.speed = result.speed;
+    game.lateralVelocity = result.lateralVelocity;
+    if (result.axis === 'side') game.heading = clamp(game.heading +
+      Math.sign(game.lateral - rival.lateral) * .13, -.75, .75);
+    if (shieldTime <= 0) game.boostTime = 0;
+    kartCrash(rival.id, rival, result);
+  }
+}
+
+function resolveAiCollisions(previous) {
+  for (let i = 0; i < game.ai.length; i++) {
+    const ai = game.ai[i];
+    for (let j = 0; j < i; j++) {
+      const other = game.ai[j];
+      const result = resolveKartCollision(previous[i], ai, other, ROAD_HALF);
+      if (!result) continue;
+      ai.distance = result.distance;
+      ai.lateral = result.lateral;
+      if (result.impact > 6 && game.raceTime - (crashCooldowns.get(`ai-${i}-${j}`) ?? -10) > .72) {
+        crashCooldowns.set(`ai-${i}-${j}`, game.raceTime);
+        opponents[i].userData.crashTime = .55;
+        opponents[j].userData.crashTime = .55;
+        spawnImpactBurst(ai.distance, (ai.lateral + other.lateral) * .5, 'crash');
+      }
+    }
+  }
 }
 
 function weaponHit(kind) {
@@ -1823,6 +1916,7 @@ function update(dt) {
     }
     game.speed = clamp(game.speed, 0, hitTime > 0 && hitKind !== 'banana' ? Math.min(cap, 12) : cap);
     const oldDistance = game.distance;
+    const previousPosition = { distance: game.distance, lateral: game.lateral };
     game.distance += game.speed * Math.cos(game.heading) * dt;
     const before = pose(oldDistance).tangent;
     const after = pose(game.distance).tangent;
@@ -1845,6 +1939,8 @@ function update(dt) {
     } else if (Math.abs(game.lateral) < ROAD_HALF - 5.5) game.offRoadNotified = false;
     if (drifting) game.driftCharge = clamp(game.driftCharge +
       dt * 38 * (selectedKart.style === 'flash' ? 1.42 : 1) * (.6 + game.speed / MAX_SPEED), 0, 100);
+    const aiPrevious = onlineRace ? [] : game.ai.map(ai =>
+      ({ distance: ai.distance, lateral: ai.lateral }));
     for (const opponent of onlineRace ? [] : game.ai) {
       opponent.slowTime = Math.max(0, (opponent.slowTime || 0) - dt);
       opponent.hitTime = Math.max(0, (opponent.hitTime || 0) - dt);
@@ -1854,18 +1950,9 @@ function update(dt) {
         (1 + Math.sin(game.raceTime * .32 + opponent.phase) * .045);
       opponent.lateral += (Math.sin(game.raceTime * .5 + opponent.phase) * 3.2 -
         opponent.lateral) * dt * .26;
-      const gap = opponent.distance - game.distance;
-      if (Math.abs(gap) < 3.3 && Math.abs(opponent.lateral - game.lateral) < 2.7 &&
-          game.speed > 24) game.speed *= Math.max(.65, 1 - dt * 2);
     }
-    if (onlineRace && shieldTime <= 0) {
-      for (const rival of connectedPlayers) {
-        if (rival.id !== network.id && Math.abs(rival.distance - game.distance) < 3 &&
-            Math.abs(rival.lateral - game.lateral) < 2.4 && game.speed > 24) {
-          game.speed *= Math.max(.68, 1 - dt * 1.8);
-        }
-      }
-    }
+    if (!onlineRace) resolveAiCollisions(aiPrevious);
+    resolveRaceCollisions(previousPosition);
     if (selectedMode === 'item') {
       const marker = Math.floor(game.distance / 170);
       if (marker > lastItem) {

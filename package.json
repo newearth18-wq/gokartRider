@@ -5,7 +5,7 @@
   "description": "Original cartoon 3D kart racer with 50-player WebSocket rooms",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/server.test.js tests/quiz.test.mjs tests/driving.test.mjs"
+    "test": "node --test tests/server.test.js tests/quiz.test.mjs tests/driving.test.mjs tests/collision.test.mjs"
   },
   "engines": { "node": ">=20" }
 }

@@ -176,3 +176,47 @@ test('room broadcasts banana traps and targets ball and pie at another rider', {
     child.kill();
   }
 });
+
+test('server keeps an overtaking kart behind a rival in the same lane', { timeout: 12000 }, async () => {
+  const port = await availablePort();
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' }, stdio: 'ignore',
+  });
+  const clients = [];
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/health`); break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 40)); }
+    }
+    const url = `ws://127.0.0.1:${port}/race`;
+    const host = await open(url), rider = await open(url);
+    clients.push(host, rider);
+    const hostWelcome = waitMessage(host, data => data.type === 'welcome');
+    host.send(JSON.stringify({ type: 'create', name: 'Host' }));
+    const room = await hostWelcome;
+    const riderWelcome = waitMessage(rider, data => data.type === 'welcome');
+    rider.send(JSON.stringify({ type: 'join', code: room.code, name: 'Rider' }));
+    await riderWelcome;
+    const racing = waitMessage(host, data => data.type === 'snapshot', 7000);
+    host.send(JSON.stringify({ type: 'start' }));
+    await racing;
+    host.send(JSON.stringify({ type: 'state', distance: 22, lateral: 0, speed: 0 }));
+    const placed = waitMessage(host, data => data.type === 'snapshot' &&
+      data.players.find(player => player.id === room.id)?.distance === 22);
+    await placed;
+    rider.send(JSON.stringify({ type: 'state', distance: 10, lateral: 0, speed: 35 }));
+    const first = waitMessage(rider, data => data.type === 'collision');
+    rider.send(JSON.stringify({ type: 'state', distance: 30, lateral: 0, speed: 60 }));
+    const hit = await first;
+    assert.ok(hit.distance <= 22 - 5.4);
+    assert.equal(hit.speed, 0);
+    assert.equal(hit.axis, 'front');
+    assert.ok(hit.bumpId > 0);
+    const visible = waitMessage(host, data => data.type === 'snapshot' &&
+      data.players.some(player => player.id !== room.id && player.bumpId > 0));
+    assert.ok((await visible).players.some(player => player.distance <= 22 - 5.4));
+  } finally {
+    for (const client of clients) client.close();
+    child.kill();
+  }
+});

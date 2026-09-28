@@ -17,6 +17,7 @@ const ROOT = __dirname;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const rooms = new Map();
 let nextPlayer = 1;
+let resolveKartCollision;
 
 function cleanName(value) {
   return String(value || 'Rider').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 18) || 'Rider';
@@ -37,8 +38,8 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, finishedAt }) =>
-    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, finishedAt }));
+  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt }) =>
+    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt }));
 }
 
 function roomStatus(room) {
@@ -105,13 +106,16 @@ function join(client, message) {
   client.rim = /^#[0-9a-fA-F]{6}$/.test(message.rim || '') ? message.rim : '#e3edf6';
   client.decal = ['bolt', 'stripe', 'star', 'plain'].includes(message.decal) ? message.decal : 'bolt';
   const slot = room.players.size;
-  client.distance = -Math.floor(slot / 4) * 4;
+  client.distance = -Math.floor(slot / 4) * 6.5;
   client.lateral = [-6, -2, 2, 6][slot % 4];
   client.speed = 0;
   client.boost = client.shield = false;
   client.held = null;
   client.hitKind = null;
   client.hitTime = client.hitId = 0;
+  client.bumpId = 0;
+  client.lastBumpAt = 0;
+  client.lastBumpWith = null;
   client.finishedAt = null;
   client.room = room;
   room.players.set(client.id, client);
@@ -137,9 +141,38 @@ function handleMessage(client, message) {
     const elapsed = Math.max(0, (Date.now() - room.startAt) / 1000);
     // A loose sanity bound blocks arbitrary leaderboard jumps without impacting boosts.
     const maxDistance = elapsed * 100 + 60;
-    client.distance = Math.min(Math.max(client.distance - 2, distance), maxDistance);
-    client.lateral = Math.max(-20, Math.min(20, lateral));
-    client.speed = Math.max(0, Math.min(105, speed));
+    const previous = { distance: client.distance, lateral: client.lateral };
+    let proposed = {
+      distance: Math.min(Math.max(client.distance - 2, distance), maxDistance),
+      lateral: Math.max(-15.15, Math.min(15.15, lateral)),
+      speed: Math.max(0, Math.min(105, speed)),
+      lateralVelocity: 0,
+    };
+    let collision = null;
+    if (room.state === 'racing') {
+      for (const rival of room.players.values()) {
+        if (rival.id === client.id || rival.finishedAt) continue;
+        const resolved = resolveKartCollision(previous, proposed, rival);
+        if (!resolved) continue;
+        proposed = resolved;
+        collision = { ...resolved, otherId: rival.id };
+      }
+    }
+    client.distance = proposed.distance;
+    client.lateral = proposed.lateral;
+    client.speed = proposed.speed;
+    if (collision) {
+      const now = Date.now();
+      if (collision.impact > 6 &&
+          (client.lastBumpWith !== collision.otherId || now - client.lastBumpAt > 720)) {
+        client.bumpId++;
+        client.lastBumpAt = now;
+        client.lastBumpWith = collision.otherId;
+      }
+      send(client, { type: 'collision', distance: client.distance, lateral: client.lateral,
+        speed: client.speed, axis: collision.axis, impact: collision.impact,
+        otherId: collision.otherId, bumpId: client.bumpId });
+    }
     client.boost = Boolean(message.boost);
     client.shield = Boolean(message.shield);
     client.held = VALID_ITEMS.has(message.held) ? message.held : null;
@@ -253,4 +286,7 @@ setInterval(() => {
   }
 }, 100);
 
-server.listen(PORT, HOST, () => console.log(`Turbo Trail listening on ${HOST}:${PORT}`));
+import('./collision.mjs').then(module => {
+  resolveKartCollision = module.resolveKartCollision;
+  server.listen(PORT, HOST, () => console.log(`Turbo Trail listening on ${HOST}:${PORT}`));
+});
