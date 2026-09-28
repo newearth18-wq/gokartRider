@@ -10,7 +10,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const MAX_PLAYERS = 50;
 const VALID_TRACKS = new Set(['meadow', 'canyon', 'snow', 'harbor']);
 const VALID_CHARACTERS = new Set(['nova', 'poppy', 'riko', 'momo', 'luna', 'mint', 'bibi', 'pixel', 'koko', 'sol']);
-const VALID_MODELS = new Set(['comet', 'rocket', 'grip', 'flash']);
+const VALID_MODELS = new Set(['comet', 'rocket', 'grip', 'flash', 'bubble', 'shark', 'hover']);
 const VALID_ITEMS = new Set(['pulse', 'shield', 'nitro', 'banana', 'ball', 'pie']);
 const ROOT = __dirname;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };

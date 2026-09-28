@@ -61,9 +61,11 @@ test('50 riders share a room and the 51st is rejected', { timeout: 30000 }, asyn
     for (let i = 1; i < 50; i++) {
       const ws = await open(url); clients.push(ws);
       const next = waitMessage(ws, data => data.type === 'welcome');
-      ws.send(JSON.stringify({ type: 'join', code: welcome.code, name: `Rider${i}` }));
+      const model = ['bubble', 'shark', 'hover'][(i - 1) % 3];
+      ws.send(JSON.stringify({ type: 'join', code: welcome.code, name: `Rider${i}`, model }));
       const joined = await next;
       assert.equal(joined.code, welcome.code);
+      assert.equal(joined.players.find(player => player.id === joined.id).model, model);
     }
     const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
     assert.equal(health.players, 50);

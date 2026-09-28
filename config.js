@@ -48,6 +48,9 @@ export const KARTS = [
   { id: 'rocket', name: 'ร็อกเก็ต', icon: '🚀', skill: 'จรวดปีกคู่ · ทางตรงเร็ว', acceleration: 1.06, topSpeed: 1.13, steering: .91, boost: 1.35, style: 'rocket', trim: 0xff743d },
   { id: 'grip', name: 'กริปเปอร์', icon: '🛞', skill: 'รถลุยล้อโต · เข้าโค้งนิ่ง', acceleration: .98, topSpeed: .96, steering: 1.24, boost: .9, style: 'grip', trim: 0x76ed6b },
   { id: 'flash', name: 'แฟลช', icon: '⚡', skill: 'สูตรหนึ่งไฟฟ้า · ออกตัวไว', acceleration: 1.23, topSpeed: .98, steering: 1.06, boost: 1, style: 'flash', trim: 0xffe34d },
+  { id: 'bubble', name: 'บับเบิล', icon: '🫧', skill: 'รถโดมกลม · คุมง่าย', acceleration: 1.02, topSpeed: .94, steering: 1.31, boost: .92, style: 'bubble', trim: 0xff91d0 },
+  { id: 'shark', name: 'ชาร์ค', icon: '🦈', skill: 'รถฉลามครีบสูง · ปลายเร็ว', acceleration: .93, topSpeed: 1.17, steering: .88, boost: 1.12, style: 'shark', trim: 0x4cd8f2 },
+  { id: 'hover', name: 'โฮเวอร์', icon: '🛸', skill: 'ยานลอยสี่ใบพัด · ดริฟต์ไว', acceleration: 1.11, topSpeed: 1.03, steering: 1.14, boost: 1.18, style: 'hover', trim: 0xa98bff },
 ];
 
 export const MAX_PLAYERS = 50;

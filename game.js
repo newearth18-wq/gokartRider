@@ -1,6 +1,6 @@
 import * as THREE from './vendor/three.module.js';
-import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=9-0';
-import { settleRoadEdge } from './driving.mjs?v=8-1';
+import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=10-0';
+import { settleRoadEdge, steerThroughCurve } from './driving.mjs?v=10-0';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
@@ -43,7 +43,7 @@ const QUIZ_REWARDS = ['ball', 'shield', 'banana', 'pie', 'nitro', 'pulse'];
 const ITEM_REWARDS = ['nitro', 'banana', 'ball', 'shield', 'pie', 'pulse'];
 const MAX_SPEED = 65;
 const touchLayout = () => matchMedia('(any-pointer: coarse)').matches || window.innerWidth <= 700;
-const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d];
+const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d, 0x68b5ff, 0xf58ad5];
 const clock = new THREE.Clock();
 const audio = new GameAudio();
 const up = new THREE.Vector3(0, 1, 0);
@@ -123,8 +123,8 @@ function freshGame() {
     driftCharge: 0, boostTime: 0, raceTime: 0,
     offRoadNotified: false, cameraReady: false,
     ai: AI_COLORS.map((color, i) => ({
-      color, distance: 9 + i * 6, lateral: [-3, 2, .1, -2, 3][i],
-      speed: 45 + i * 2.5, phase: i * 1.7,
+      color, distance: 9 + i * 6, lateral: [-3, 2, .1, -2, 3, -1, 1][i],
+      speed: 45 + i * 1.8, phase: i * 1.7,
     })),
   };
 }
@@ -546,14 +546,19 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
 
   box(chassis, 2.6, .28, 3.7, dark, 0, .64, 0);
   const shell = mesh(new THREE.SphereGeometry(1, lite ? 12 : 24, lite ? 8 : 14), body, chassis, 0, .98, .1);
-  shell.scale.set(model.style === 'grip' ? 1.78 : model.style === 'rocket' ? 1.18 : model.style === 'flash' ? 1.29 : 1.55,
-    model.style === 'grip' ? .68 : model.style === 'flash' ? .31 : .48,
-    model.style === 'rocket' ? 2.42 : model.style === 'flash' ? 2.55 : model.style === 'grip' ? 1.83 : 2.22);
+  const shellSize = {
+    grip: [1.78, .68, 1.83], rocket: [1.18, .48, 2.42], flash: [1.29, .31, 2.55],
+    bubble: [1.72, .82, 1.79], shark: [1.20, .43, 2.59], hover: [1.51, .31, 1.92],
+  }[model.style] || [1.55, .48, 2.22];
+  shell.scale.set(...shellSize);
   const centerStripe = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), trim, chassis, 0, 1.39, .12);
   centerStripe.scale.set(model.style === 'grip' ? .48 : .35, .05, model.style === 'grip' ? 1.35 : 1.71);
   const nose = mesh(new THREE.SphereGeometry(1, lite ? 10 : 22, lite ? 8 : 12), bodyLight, chassis, 0, .95, 1.34);
-  nose.scale.set(model.style === 'rocket' ? .70 : model.style === 'grip' ? 1.08 : model.style === 'flash' ? .67 : .87,
-    model.style === 'grip' ? .48 : .34, model.style === 'flash' ? 1.60 : model.style === 'rocket' ? 1.47 : 1.13);
+  const noseSize = {
+    rocket: [.70, .34, 1.47], grip: [1.08, .48, 1.13], flash: [.67, .34, 1.60],
+    bubble: [1.02, .50, 1.00], shark: [.57, .32, 1.78], hover: [.95, .23, 1.20],
+  }[model.style] || [.87, .34, 1.13];
+  nose.scale.set(...noseSize);
   const noseStripe = mesh(new THREE.SphereGeometry(1, 16, 10), highlight, chassis, 0, 1.20, 1.66);
   noseStripe.scale.set(.17, .035, .72);
   for (const x of [-1.25, 1.25]) {
@@ -610,6 +615,54 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
     box(chassis, .66, .12, 1.44, trim, 0, 1.43, 1.42);
     box(chassis, 4.18, .14, .54, trim, 0, .68, 2.64);
     box(chassis, .48, .26, 1.26, bodyLight, 0, .92, 2.25);
+  } else if (model.style === 'bubble') {
+    const bumperRing = mesh(new THREE.TorusGeometry(1.85, .22, 8, 40), trim, chassis, 0, .88, .16);
+    bumperRing.rotation.x = Math.PI / 2;
+    bumperRing.scale.y = 1.05;
+    const canopy = mesh(new THREE.SphereGeometry(1.19, 24, 16),
+      new THREE.MeshStandardMaterial({ color: 0xa8f6ff, roughness: .12, metalness: .08,
+        transparent: true, opacity: .23, depthWrite: false, side: THREE.DoubleSide }), chassis,
+      0, 2.19, -.51);
+    canopy.scale.set(1.04, 1.03, 1.10);
+    const canopyBand = mesh(new THREE.TorusGeometry(1.17, .09, 8, 32), trim, chassis, 0, 1.83, -.51);
+    canopyBand.rotation.x = Math.PI / 2;
+    for (const x of [-1.48, 1.48]) {
+      const sideBubble = mesh(new THREE.SphereGeometry(.60, 14, 10), bodyLight, chassis, x, .93, -.77);
+      sideBubble.scale.set(.62, .70, 1.05);
+    }
+  } else if (model.style === 'shark') {
+    const snout = mesh(new THREE.ConeGeometry(.57, 1.58, 12), bodyLight, chassis, 0, .97, 2.85);
+    snout.rotation.x = Math.PI / 2;
+    const fin = mesh(new THREE.ConeGeometry(.74, 2.05, 3), trim, chassis, 0, 2.89, -1.63);
+    fin.rotation.y = Math.PI / 2;
+    for (const x of [-1, 1]) {
+      const sideFin = box(chassis, 1.43, .12, .78, trim, x * 1.28, .94, -.83);
+      sideFin.rotation.y = x * .38;
+      const tail = box(chassis, .13, 1.05, .85, trim, x * .67, 1.70, -2.13);
+      tail.rotation.z = x * .48;
+      for (const z of [.65, .90, 1.15]) box(chassis, .08, .30, .09, dark, x * 1.16, 1.12, z);
+      for (const z of [1.85, 2.18]) {
+        const tooth = mesh(new THREE.ConeGeometry(.13, .32, 6), white, chassis, x * .64, .64, z);
+        tooth.rotation.z = Math.PI;
+      }
+    }
+  } else if (model.style === 'hover') {
+    const hoverGlow = new THREE.MeshBasicMaterial({ color: model.trim, transparent: true, opacity: .75 });
+    const halo = mesh(new THREE.TorusGeometry(1.78, .13, 8, 38), hoverGlow, chassis, 0, .76, 0);
+    halo.rotation.x = Math.PI / 2;
+    halo.scale.y = 1.35;
+    for (const x of [-1.56, 1.56]) {
+      for (const z of [-1.28, 1.28]) {
+        const pod = mesh(new THREE.CylinderGeometry(.55, .48, .23, 16), dark, chassis, x, .73, z);
+        const rotor = mesh(new THREE.TorusGeometry(.43, .10, 7, 20), hoverGlow, chassis, x, .88, z);
+        rotor.rotation.x = Math.PI / 2;
+        pod.rotation.y = x * z * .05;
+      }
+    }
+    box(chassis, 2.77, .12, .60, trim, 0, 1.08, -1.75);
+    const antenna = box(chassis, .09, .75, .09, trim, 0, 2.19, -1.59);
+    antenna.rotation.z = .16;
+    mesh(new THREE.SphereGeometry(.22, 10, 8), hoverGlow, chassis, .12, 2.61, -1.59);
   } else {
     for (const x of [-.71, .71]) {
       box(chassis, .18, .09, 1.8, white, x, 1.45, .87);
@@ -623,6 +676,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
     for (const z of [-1.35, 1.42]) {
       const mount = new THREE.Group();
       mount.position.set(model.style === 'grip' ? x * 1.12 : x, model.style === 'grip' ? .74 : .61, z);
+      mount.visible = model.style !== 'hover';
       chassis.add(mount);
       const rolling = new THREE.Group();
       mount.add(rolling);
@@ -788,6 +842,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   pulseRing.rotation.x = Math.PI / 2;
   pulseRing.visible = false;
   group.userData = { chassis, driver, head, arms, wheels, flames, shieldBubble, pulseRing, weaponMeshes,
+    modelStyle: model.style,
     waveTime: 0, lastDistance: 0, animationTime: 0 };
   scene.add(group);
   return group;
@@ -869,7 +924,8 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   const parts = kart.userData;
   parts.animationTime += dt;
   const motion = Math.min(1, speed / MAX_SPEED);
-  kart.position.y += .16 + Math.sin(parts.animationTime * (10 + speed * .24)) * .025 * motion;
+  kart.position.y += .16 + (parts.modelStyle === 'hover' ? .48 + Math.sin(parts.animationTime * 3.8) * .07 : 0) +
+    Math.sin(parts.animationTime * (10 + speed * .24)) * .025 * motion;
   kart.rotation.y = Math.atan2(at.tangent.x, at.tangent.z) - heading;
   parts.chassis.rotation.z = lerp(parts.chassis.rotation.z, -lean * .19, Math.min(1, dt * 9));
   parts.chassis.rotation.x = lerp(parts.chassis.rotation.x, -motion * .025 - (boost ? .045 : 0), Math.min(1, dt * 5));
@@ -1446,7 +1502,7 @@ function updateHud() {
     updateLeaderboard();
     lastLeaderboardUpdate = performance.now();
   }
-  ui.position.innerHTML = String(rank()) + `<span>/ ${onlineRace ? Math.max(1, connectedPlayers.length) : 6}</span>`;
+  ui.position.innerHTML = String(rank()) + `<span>/ ${onlineRace ? Math.max(1, connectedPlayers.length) : game.ai.length + 1}</span>`;
   ui.lap.innerHTML = String(Math.max(1, Math.min(RACE_LAPS, Math.floor(game.distance / trackLength) + 1))) +
     `<span>/ ${RACE_LAPS}</span>`;
   ui.time.textContent = formatTime(game.raceTime);
@@ -1665,19 +1721,15 @@ function update(dt) {
     game.speed = clamp(game.speed, 0, cap);
     const oldDistance = game.distance;
     game.distance += game.speed * Math.cos(game.heading) * dt;
-    game.steerMomentum = lerp(game.steerMomentum, steer, 1 - Math.exp(-dt * (drifting ? 7 : 10)));
-    const targetHeading = game.steerMomentum * selectedKart.steering * (drifting ? .26 : .19) *
-      (.48 + .52 * game.speed / MAX_SPEED) - clamp(game.lateral / ROAD_HALF, -1, 1) * .018 +
-      (hitTime > 0 ? Math.sin(game.raceTime * 20) * .045 : 0);
-    game.heading = lerp(game.heading, targetHeading, 1 - Math.exp(-dt * (drifting ? 3.7 : 6)));
-    const targetSlide = game.speed * Math.sin(game.heading) * (drifting ? .49 : .43);
-    game.lateralVelocity = lerp(game.lateralVelocity, targetSlide, 1 - Math.exp(-dt * (drifting ? 2.4 : 5)));
-    game.lateral += game.lateralVelocity * dt;
     const before = pose(oldDistance).tangent;
     const after = pose(game.distance).tangent;
     const curveTurn = Math.atan2(before.x * after.z - before.z * after.x,
       before.x * after.x + before.z * after.z);
-    game.heading = clamp(game.heading + curveTurn * (drifting ? .25 : .12), -.34, .34);
+    Object.assign(game, steerThroughCurve(game, steer, game.speed, selectedKart.steering,
+      curveTurn, dt, drifting));
+    if (hitTime > 0) game.heading = clamp(game.heading + Math.sin(game.raceTime * 20) * .035 * dt,
+      -.65, .65);
+    game.lateral += game.lateralVelocity * dt;
     const settled = settleRoadEdge(game.lateral, game.lateralVelocity, game.speed, steer, dt, ROAD_HALF);
     game.lateral = settled.lateral;
     game.lateralVelocity = settled.lateralVelocity;
@@ -1922,6 +1974,9 @@ $('#kartChoices').addEventListener('click', event => {
   selectedKart = KARTS.find(kart => kart.id === button.dataset.kart) || KARTS[0];
   try { localStorage.setItem('turbo-trail-garage', JSON.stringify({ ...appearance, model: selectedKart.id })); } catch {}
   buildWorld(); renderChoices();
+  const choices = $('#kartChoices'), active = choices.querySelector('.active');
+  const row = choices.getBoundingClientRect(), card = active.getBoundingClientRect();
+  choices.scrollLeft += card.left - row.left - (row.width - card.width) / 2;
 });
 
 let editorDraft = [];
