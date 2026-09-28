@@ -11,6 +11,7 @@ const MAX_PLAYERS = 50;
 const VALID_TRACKS = new Set(['meadow', 'canyon', 'snow', 'harbor']);
 const VALID_CHARACTERS = new Set(['nova', 'poppy', 'riko', 'momo', 'luna', 'mint', 'bibi', 'pixel', 'koko', 'sol']);
 const VALID_MODELS = new Set(['comet', 'rocket', 'grip', 'flash']);
+const VALID_ITEMS = new Set(['pulse', 'shield', 'nitro', 'banana', 'ball', 'pie']);
 const ROOT = __dirname;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const rooms = new Map();
@@ -35,8 +36,8 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }) =>
-    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, finishedAt }));
+  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, finishedAt }) =>
+    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, finishedAt }));
 }
 
 function roomStatus(room) {
@@ -107,6 +108,7 @@ function join(client, message) {
   client.lateral = [-6, -2, 2, 6][slot % 4];
   client.speed = 0;
   client.boost = client.shield = false;
+  client.held = null;
   client.finishedAt = null;
   client.room = room;
   room.players.set(client.id, client);
@@ -137,13 +139,31 @@ function handleMessage(client, message) {
     client.speed = Math.max(0, Math.min(105, speed));
     client.boost = Boolean(message.boost);
     client.shield = Boolean(message.shield);
+    client.held = VALID_ITEMS.has(message.held) ? message.held : null;
     return;
   }
   if (message.type === 'item' && (room.mode === 'item' || room.learning) && room.state === 'racing') {
-    if (!['pulse', 'shield', 'nitro'].includes(message.item)) return;
-    if (Date.now() - (client.lastItemAt || 0) < 4000) return;
+    if (!VALID_ITEMS.has(message.item)) return;
+    if (Date.now() - (client.lastItemAt || 0) < 1000) return;
     client.lastItemAt = Date.now();
-    broadcast(room, { type: 'item', id: client.id, item: message.item });
+    const event = { type: 'item', id: client.id, item: message.item };
+    if (message.item === 'banana') {
+      event.distance = client.distance - 6;
+      event.lateral = client.lateral;
+    } else if (message.item === 'ball' || message.item === 'pie') {
+      const rivals = [...room.players.values()].filter(player => player.id !== client.id && !player.finishedAt &&
+        Math.abs(player.distance - client.distance) <= 180);
+      rivals.sort((a, b) => {
+        const aGap = a.distance - client.distance, bGap = b.distance - client.distance;
+        return (aGap >= -6 ? 0 : 1) - (bGap >= -6 ? 0 : 1) || Math.abs(aGap) - Math.abs(bGap);
+      });
+      event.targetId = rivals[0]?.id || null;
+      event.fromDistance = client.distance;
+      event.fromLateral = client.lateral;
+      event.toDistance = rivals[0]?.distance ?? client.distance + 65;
+      event.toLateral = rivals[0]?.lateral ?? client.lateral;
+    }
+    broadcast(room, event);
     return;
   }
   if (message.type === 'finish' && room.state === 'racing' && !client.finishedAt) {

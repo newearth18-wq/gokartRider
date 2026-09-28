@@ -1,10 +1,10 @@
 import * as THREE from './vendor/three.module.js';
-import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=8-1';
+import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=9-0';
 import { settleRoadEdge } from './driving.mjs?v=8-1';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
-import { GameAudio } from './audio.js?v=8-1';
+import { GameAudio } from './audio.js?v=9-0';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -35,7 +35,12 @@ const POWERS = {
   nitro: { icon: '🚀', name: 'ไนโตร', detail: 'พุ่งเร็ว 3.5 วินาที' },
   shield: { icon: '🛡️', name: 'เกราะป้องกัน', detail: 'กันชนและขอบสนาม 7 วินาที' },
   pulse: { icon: '⚡', name: 'คลื่นพลัง', detail: 'ชะลอคู่แข่งด้านหน้า' },
+  banana: { icon: '🍌', name: 'เปลือกกล้วย', detail: 'ทิ้งไว้ให้เพื่อนที่ตามมาลื่น' },
+  ball: { icon: '🏐', name: 'ลูกบอลเด้ง', detail: 'ยิงใส่เพื่อนที่อยู่ใกล้' },
+  pie: { icon: '🥧', name: 'พายครีม', detail: 'ปาพายใส่เพื่อนให้เสียจังหวะ' },
 };
+const QUIZ_REWARDS = ['ball', 'shield', 'banana', 'pie', 'nitro', 'pulse'];
+const ITEM_REWARDS = ['nitro', 'banana', 'ball', 'shield', 'pie', 'pulse'];
 const MAX_SPEED = 65;
 const touchLayout = () => matchMedia('(any-pointer: coarse)').matches || window.innerWidth <= 700;
 const AI_COLORS = [0xfa5b73, 0xffe25c, 0x48dec9, 0xa486f4, 0xff9a4d];
@@ -97,6 +102,10 @@ let quizAttempted = 0;
 let editingIndex = 0;
 let shieldTime = 0;
 let pulseTime = 0;
+let hitTime = 0;
+let hitKind = null;
+let bananaTraps = [];
+let projectiles = [];
 let lastLeaderboardUpdate = 0;
 let renderedRoomQr = '';
 let scannerStream = null;
@@ -533,19 +542,24 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   const white = makeMaterial(0xffffff, .18);
   const eye = makeMaterial(0x14233b, .13);
   const model = KARTS.find(kart => kart.id === look.model) || KARTS[0];
+  const trim = makeMaterial(model.trim, .28, .14);
 
   box(chassis, 2.6, .28, 3.7, dark, 0, .64, 0);
   const shell = mesh(new THREE.SphereGeometry(1, lite ? 12 : 24, lite ? 8 : 14), body, chassis, 0, .98, .1);
-  shell.scale.set(1.55, .48, 2.22);
-  const centerStripe = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), accent, chassis, 0, 1.39, .12);
-  centerStripe.scale.set(.35, .045, 1.71);
+  shell.scale.set(model.style === 'grip' ? 1.78 : model.style === 'rocket' ? 1.18 : model.style === 'flash' ? 1.29 : 1.55,
+    model.style === 'grip' ? .68 : model.style === 'flash' ? .31 : .48,
+    model.style === 'rocket' ? 2.42 : model.style === 'flash' ? 2.55 : model.style === 'grip' ? 1.83 : 2.22);
+  const centerStripe = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), trim, chassis, 0, 1.39, .12);
+  centerStripe.scale.set(model.style === 'grip' ? .48 : .35, .05, model.style === 'grip' ? 1.35 : 1.71);
   const nose = mesh(new THREE.SphereGeometry(1, lite ? 10 : 22, lite ? 8 : 12), bodyLight, chassis, 0, .95, 1.34);
-  nose.scale.set(.87, .34, 1.13);
+  nose.scale.set(model.style === 'rocket' ? .70 : model.style === 'grip' ? 1.08 : model.style === 'flash' ? .67 : .87,
+    model.style === 'grip' ? .48 : .34, model.style === 'flash' ? 1.60 : model.style === 'rocket' ? 1.47 : 1.13);
   const noseStripe = mesh(new THREE.SphereGeometry(1, 16, 10), highlight, chassis, 0, 1.20, 1.66);
   noseStripe.scale.set(.17, .035, .72);
   for (const x of [-1.25, 1.25]) {
     const pod = mesh(new THREE.SphereGeometry(1, lite ? 10 : 20, 10), body, chassis, x, .91, -.12);
-    pod.scale.set(.48, .33, 1.36);
+    pod.scale.set(model.style === 'grip' ? .60 : model.style === 'rocket' ? .33 : .48,
+      model.style === 'grip' ? .48 : .33, model.style === 'flash' ? 1.62 : 1.36);
     const podStripe = mesh(new THREE.SphereGeometry(1, 12, 8), accent, chassis, x, 1.14, -.1);
     podStripe.scale.set(.25, .045, 1.06);
     const fender = mesh(new THREE.SphereGeometry(1, lite ? 10 : 18, 10), bodyLight, chassis, x, .83, 1.42);
@@ -554,7 +568,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   }
   const intake = mesh(new THREE.SphereGeometry(1, 12, 8), dark, chassis, 0, .73, 2.19);
   intake.scale.set(.55, .12, .1);
-  const bumper = mesh(new THREE.SphereGeometry(1, 12, 8), accent, chassis, 0, .59, 2.27);
+  const bumper = mesh(new THREE.SphereGeometry(1, 12, 8), trim, chassis, 0, .59, 2.27);
   bumper.scale.set(1.85, .17, .22);
   const rear = mesh(new THREE.SphereGeometry(1, 12, 8), dark, chassis, 0, .67, -2.0);
   rear.scale.set(1.7, .25, .24);
@@ -562,40 +576,61 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   box(chassis, 2.6, .13, .55, accent, 0, 1.5, -2.02);
   box(chassis, 2.3, .15, .22, accent, 0, 1.53, .78);
   if (model.style === 'rocket') {
-    const fin = makeMaterial(0xffcf54, .24, .2);
-    box(chassis, 2.9, .14, .62, fin, 0, 1.72, -1.9);
+    box(chassis, 3.6, .15, .70, trim, 0, 1.85, -2.0);
     for (const x of [-1.24, 1.24]) {
-      const wing = mesh(new THREE.ConeGeometry(.34, 1.85, 4), bodyLight, chassis, x, 1.02, -.95);
+      const wing = mesh(new THREE.ConeGeometry(.57, 2.1, 4), bodyLight, chassis, x, 1.0, -.82);
       wing.rotation.x = Math.PI / 2;
+      box(chassis, .28, 1.05, 1.24, trim, x * 1.25, 1.60, -1.75);
+      const jet = mesh(new THREE.CylinderGeometry(.38, .52, .96, 12), dark, chassis, x * .72, .91, -2.30);
+      jet.rotation.x = Math.PI / 2;
+      const glow = mesh(new THREE.CircleGeometry(.33, 12), trim, chassis, x * .72, .91, -2.85);
+      glow.rotation.y = Math.PI;
     }
-    const noseCone = mesh(new THREE.ConeGeometry(.47, 1.05, 12), accent, chassis, 0, 1.06, 2.45);
+    const noseCone = mesh(new THREE.ConeGeometry(.60, 1.70, 12), trim, chassis, 0, 1.08, 2.73);
     noseCone.rotation.x = Math.PI / 2;
   } else if (model.style === 'grip') {
     for (const x of [-1.4, 1.4]) {
-      box(chassis, .42, .30, 1.25, accent, x, .76, 1.05);
-      box(chassis, .36, .15, 1.0, highlight, x, 1.0, 1.05);
+      box(chassis, .63, .49, 1.75, trim, x * 1.19, .99, 1.02);
+      box(chassis, .48, .16, 1.38, dark, x * 1.19, 1.31, 1.02);
+      box(chassis, .24, 1.22, .25, trim, x * .90, 2.21, -1.50);
     }
-    box(chassis, 3.3, .22, .42, bodyLight, 0, 1.16, -1.95);
+    box(chassis, 3.8, .33, .60, trim, 0, 1.20, -1.99);
+    box(chassis, 1.58, .19, .26, trim, 0, 2.87, -1.50);
+    box(chassis, 3.95, .36, .34, dark, 0, .78, 2.22);
+    for (const x of [-1.55, 1.55]) mesh(new THREE.SphereGeometry(.22, 10, 8), highlight, chassis, x, 1.13, 2.29);
   } else if (model.style === 'flash') {
-    const flash = makeMaterial(0xffe852, .25);
     for (const x of [-1, 1]) {
-      const blade = box(chassis, .18, .12, 1.35, flash, x, 1.45, .62);
+      const blade = box(chassis, .24, .13, 1.95, trim, x * 1.22, 1.21, .82);
       blade.rotation.y = x * .28;
+      const wing = box(chassis, 1.18, .13, .44, trim, x * 1.35, .78, 1.93);
+      wing.rotation.y = x * -.22;
+      box(chassis, .16, .37, .56, dark, x * 2.04, .84, 2.63);
     }
-    box(chassis, 2.8, .12, .42, flash, 0, 1.66, -2.05);
-    box(chassis, .56, .12, 1.04, flash, 0, 1.46, 1.24);
+    box(chassis, 3.55, .18, .45, trim, 0, 1.77, -2.15);
+    box(chassis, .66, .12, 1.44, trim, 0, 1.43, 1.42);
+    box(chassis, 4.18, .14, .54, trim, 0, .68, 2.64);
+    box(chassis, .48, .26, 1.26, bodyLight, 0, .92, 2.25);
+  } else {
+    for (const x of [-.71, .71]) {
+      box(chassis, .18, .09, 1.8, white, x, 1.45, .87);
+      const aero = box(chassis, .42, .20, .78, trim, x * 1.5, 1.41, -1.73);
+      aero.rotation.y = x * .12;
+    }
+    box(chassis, 3.13, .13, .48, trim, 0, 1.72, -2.06);
   }
   const wheels = [];
   for (const x of [-1.62, 1.62]) {
     for (const z of [-1.35, 1.42]) {
       const mount = new THREE.Group();
-      mount.position.set(x, .61, z);
+      mount.position.set(model.style === 'grip' ? x * 1.12 : x, model.style === 'grip' ? .74 : .61, z);
       chassis.add(mount);
       const rolling = new THREE.Group();
       mount.add(rolling);
-      const tire = mesh(new THREE.CylinderGeometry(.58, .58, .47, lite ? 10 : 24), rubber, rolling);
+      const wheelRadius = model.style === 'grip' ? .75 : model.style === 'flash' ? .50 : .58;
+      const wheelWidth = model.style === 'grip' ? .69 : .47;
+      const tire = mesh(new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelWidth, lite ? 10 : 24), rubber, rolling);
       tire.rotation.z = Math.PI / 2;
-      const hub = mesh(new THREE.CylinderGeometry(.32, .32, .49, lite ? 10 : 20), rim, rolling,
+      const hub = mesh(new THREE.CylinderGeometry(wheelRadius * .56, wheelRadius * .56, wheelWidth + .02, lite ? 10 : 20), rim, rolling,
         Math.sign(x) * .02);
       hub.rotation.z = Math.PI / 2;
       if (!lite) {
@@ -606,7 +641,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
           Math.sign(x) * .29);
         wheelRing.rotation.y = Math.PI / 2;
       }
-      wheels.push({ mount, rolling, front: z > 0 });
+      wheels.push({ mount, rolling, front: z > 0, radius: wheelRadius });
     }
   }
   const driver = new THREE.Group();
@@ -689,6 +724,38 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
       star.scale.y = .18;
     }
   }
+  // The rear gadget dock stays visible; its loaded weapon changes with inventory.
+  box(chassis, 1.25, .16, .82, dark, 0, 1.65, -2.25);
+  box(chassis, 1.02, .12, .70, trim, 0, 1.76, -2.25);
+  for (const x of [-1.30, 1.30]) {
+    const launcher = mesh(new THREE.CylinderGeometry(.14, .19, .78, 9), trim, chassis, x, 1.37, 1.18);
+    launcher.rotation.x = Math.PI / 2;
+    mesh(new THREE.TorusGeometry(.16, .045, 6, 12), dark, chassis, x, 1.37, 1.60);
+  }
+  const weaponMeshes = {};
+  const bananaModel = new THREE.Group();
+  bananaModel.position.set(0, 2.19, -2.25);
+  chassis.add(bananaModel);
+  const bananaArc = mesh(new THREE.TorusGeometry(.43, .14, 7, 17, Math.PI * 1.3),
+    makeMaterial(0xffe446, .35), bananaModel);
+  bananaArc.rotation.z = .42;
+  mesh(new THREE.SphereGeometry(.13, 8, 6), makeMaterial(0x795b2c), bananaModel, -.42, -.15, 0);
+  weaponMeshes.banana = bananaModel;
+  const ballModel = new THREE.Group();
+  ballModel.position.set(0, 2.25, -2.25);
+  chassis.add(ballModel);
+  mesh(new THREE.SphereGeometry(.48, 12, 10), makeMaterial(0xff5368, .26), ballModel);
+  const ballBand = mesh(new THREE.TorusGeometry(.48, .08, 7, 17), white, ballModel);
+  ballBand.rotation.y = .45;
+  weaponMeshes.ball = ballModel;
+  const pieModel = new THREE.Group();
+  pieModel.position.set(0, 2.17, -2.25);
+  chassis.add(pieModel);
+  mesh(new THREE.CylinderGeometry(.52, .38, .19, 14), makeMaterial(0xffc06f), pieModel);
+  mesh(new THREE.SphereGeometry(.43, 12, 8), white, pieModel, 0, .14, 0).scale.y = .43;
+  mesh(new THREE.SphereGeometry(.12, 8, 6), makeMaterial(0xef4f6b), pieModel, 0, .37, 0);
+  weaponMeshes.pie = pieModel;
+  Object.values(weaponMeshes).forEach(object => { object.visible = false; });
   if (!lite) {
     const lamp = new THREE.MeshBasicMaterial({ color: 0xfff3b9 });
     for (const x of [-1.12, 1.12]) {
@@ -720,7 +787,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
       depthWrite: false }), chassis, 0, .65, 0);
   pulseRing.rotation.x = Math.PI / 2;
   pulseRing.visible = false;
-  group.userData = { chassis, driver, head, arms, wheels, flames, shieldBubble, pulseRing,
+  group.userData = { chassis, driver, head, arms, wheels, flames, shieldBubble, pulseRing, weaponMeshes,
     waveTime: 0, lastDistance: 0, animationTime: 0 };
   scene.add(group);
   return group;
@@ -791,10 +858,12 @@ function buildWorld() {
   opponents.forEach(kart => { kart.visible = false; });
   remoteKarts.clear();
   smoke = [];
+  bananaTraps = [];
+  projectiles = [];
   game = freshGame();
 }
 
-function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false) {
+function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false, weapon = null) {
   const at = pose(distance);
   kart.position.copy(at.point).addScaledVector(at.right, lateral);
   const parts = kart.userData;
@@ -811,7 +880,7 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   parts.head.rotation.x = Math.sin(parts.animationTime * 3) * .025;
   parts.arms.forEach((arm, i) => { arm.rotation.z = lean * (i ? -.38 : .38); });
   for (const wheel of parts.wheels) {
-    wheel.rolling.rotation.x += speed * dt / .58;
+    wheel.rolling.rotation.x += speed * dt / wheel.radius;
     if (wheel.front) wheel.mount.rotation.y = lerp(wheel.mount.rotation.y, -lean * .42, Math.min(1, dt * 12));
   }
   for (const flame of kart.userData.flames) {
@@ -819,6 +888,7 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
     if (boost) flame.scale.y = .7 + Math.random() * .7;
   }
   parts.shieldBubble.visible = shield;
+  for (const [kind, object] of Object.entries(parts.weaponMeshes)) object.visible = weapon === kind;
   parts.waveTime = Math.max(0, parts.waveTime - dt);
   parts.pulseRing.visible = parts.waveTime > 0;
   if (parts.waveTime > 0) {
@@ -850,7 +920,7 @@ function syncRemoteKarts(dt) {
     kart.userData.distance = Math.abs(player.distance - kart.userData.distance) > 70 ?
       player.distance : lerp(kart.userData.distance, player.distance, Math.min(1, dt * 9));
     kart.userData.lateral = lerp(kart.userData.lateral, player.lateral, Math.min(1, dt * 9));
-    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield);
+    syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield, player.held);
   }
   for (const [id, kart] of remoteKarts) {
     if (active.has(id)) continue;
@@ -1124,15 +1194,7 @@ function onNetworkMessage(data) {
   if (data.type === 'finish' && data.id === network.id && game.mode === 'finished') {
     ui.resultPlace.textContent = `${data.place}/${connectedPlayers.length}`;
   }
-  if (data.type === 'item' && data.id !== network.id && data.item === 'pulse' && game.mode === 'racing') {
-    const attackerKart = remoteKarts.get(data.id);
-    if (attackerKart) attackerKart.userData.waveTime = 1;
-    const attacker = connectedPlayers.find(player => player.id === data.id);
-    if (attacker && attacker.distance < game.distance && game.distance - attacker.distance < 120 && shieldTime <= 0) {
-      pulseTime = 1.5;
-      toast('โดนคลื่นพลัง! ⚡');
-    }
-  }
+  if (data.type === 'item' && game.mode === 'racing') handleWeaponEvent(data);
   if (data.type === 'error') setNetworkStatus(data.message, true);
 }
 
@@ -1206,6 +1268,9 @@ function resetRace(online = false, startAt = 0) {
   pointerControls.clear();
   resetTouchSteering();
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
+  hitTime = 0; hitKind = null;
+  for (const effect of [...bananaTraps, ...projectiles]) scene.remove(effect.mesh);
+  bananaTraps = []; projectiles = [];
   earnedPower = null; activeQuiz = null; nextQuizDistance = FIRST_QUIZ_DISTANCE;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
   $('#quizPanel').hidden = true;
@@ -1292,14 +1357,14 @@ function showQuiz() {
   if (!learningEnabled || !raceQuestions.length || activeQuiz || game.mode !== 'racing') return;
   const index = quizCursor % raceQuestions.length;
   const question = raceQuestions[index];
-  const reward = ['nitro', 'shield', 'pulse'][quizCorrect % 3];
+  const reward = QUIZ_REWARDS[quizCorrect % QUIZ_REWARDS.length];
   activeQuiz = { index, deadline: performance.now() + 20000 };
   game.mode = 'quiz';
   game.speed = 0;
   Object.keys(keys).forEach(key => { keys[key] = false; });
   resetTouchSteering();
   if (onlineRace) network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
-    speed: 0, boost: false, shield: shieldTime > 0 });
+    speed: 0, boost: false, shield: shieldTime > 0, held: earnedPower || heldItem });
   $('#quizQuestion').textContent = question.question;
   $('#quizReward').textContent = `ตอบถูกได้ ${POWERS[reward].icon} ${POWERS[reward].name}`;
   $('#quizOptions').replaceChildren(...question.options.map((option, choice) => {
@@ -1323,7 +1388,7 @@ function answerQuiz(choice) {
     quizAttempted++;
     if (choice === question.answer) {
       audio.cue('correct');
-      earnedPower = ['nitro', 'shield', 'pulse'][quizCorrect % 3];
+      earnedPower = QUIZ_REWARDS[quizCorrect % QUIZ_REWARDS.length];
       quizCorrect++;
       toast(`ถูกต้อง! ได้ ${POWERS[earnedPower].icon} ${POWERS[earnedPower].name} · กดใช้พลัง`, 2.4);
     } else { audio.cue('wrong'); toast(`ยังไม่ถูก · คำตอบคือ ${question.options[question.answer]}`, 2.4); }
@@ -1391,7 +1456,7 @@ function updateHud() {
   $('#quizScore').textContent = `${quizCorrect}/${quizAttempted}`;
   const ready = game.driftCharge >= 55 || Boolean(earnedPower || heldItem);
   const power = earnedPower || heldItem;
-  ui.boostHint.textContent = power ? `${earnedPower ? 'พลังจากคำตอบ' : 'ไอเท็ม'}: ${power === 'nitro' ? 'ไนโตร' : power === 'shield' ? 'โล่' : 'คลื่นพลัง'} · กด BOOST` :
+  ui.boostHint.textContent = power ? `${earnedPower ? 'พลังจากคำตอบ' : 'ไอเท็ม'}: ${POWERS[power].name} · กด BOOST` :
     game.boostTime > 0 ? 'TURBO ACTIVE!' :
     ready ? 'บูสต์พร้อมแล้ว!' : 'ดริฟต์เพื่อชาร์จบูสต์';
   $('.boost-button').classList.toggle('ready', ready);
@@ -1405,6 +1470,118 @@ function updateHud() {
   }
 }
 
+function weaponMesh(kind) {
+  const group = new THREE.Group();
+  const yellow = makeMaterial(0xffe039, .42);
+  const pink = makeMaterial(0xff5c7d, .32);
+  const white = makeMaterial(0xffffff, .38);
+  if (kind === 'banana') {
+    for (let i = 0; i < 4; i++) {
+      const peel = mesh(new THREE.ConeGeometry(.32, 1.45, 7), yellow, group);
+      peel.position.set(Math.sin(i * Math.PI / 2) * .37, .19, Math.cos(i * Math.PI / 2) * .37);
+      peel.rotation.z = Math.cos(i * Math.PI / 2) * .92;
+      peel.rotation.x = -Math.sin(i * Math.PI / 2) * .92;
+    }
+    mesh(new THREE.SphereGeometry(.32, 10, 8), yellow, group, 0, .21, 0);
+  } else if (kind === 'ball') {
+    mesh(new THREE.SphereGeometry(.84, 18, 12), pink, group);
+    for (const angle of [0, Math.PI / 2]) {
+      const stripe = mesh(new THREE.TorusGeometry(.85, .10, 8, 28), white, group);
+      stripe.rotation.y = angle;
+    }
+  } else {
+    mesh(new THREE.CylinderGeometry(.83, .72, .30, 18), makeMaterial(0xd99449), group);
+    mesh(new THREE.SphereGeometry(.75, 16, 10), white, group, 0, .21, 0).scale.y = .42;
+    mesh(new THREE.SphereGeometry(.17, 10, 8), pink, group, 0, .53, 0);
+  }
+  scene.add(group);
+  return group;
+}
+
+function weaponPosition(distance, lateral, height = 0) {
+  const at = pose(distance);
+  return at.point.clone().addScaledVector(at.right, lateral).add(new THREE.Vector3(0, height, 0));
+}
+
+function removeWeapon(effect) {
+  scene.remove(effect.mesh);
+  effect.mesh.traverse(object => {
+    object.geometry?.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) material?.dispose();
+  });
+}
+
+function weaponHit(kind) {
+  if (shieldTime > 0) {
+    toast('เกราะป้องกันรับการโจมตี! 🛡️');
+    audio.cue('blocked');
+    return;
+  }
+  hitKind = kind;
+  hitTime = kind === 'pie' ? 2.0 : kind === 'banana' ? 1.7 : 1.3;
+  game.speed *= kind === 'banana' ? .35 : .55;
+  toast(kind === 'banana' ? 'ลื่นเปลือกกล้วย! 🍌' : kind === 'pie' ? 'โดนพายครีม! 🥧' : 'โดนลูกบอลเด้ง! 🏐', 1.8);
+  audio.cue('hit');
+}
+
+function handleWeaponEvent(event) {
+  if (event.item === 'pulse') {
+    const attackerKart = remoteKarts.get(event.id);
+    if (attackerKart) attackerKart.userData.waveTime = 1;
+    const attacker = connectedPlayers.find(player => player.id === event.id);
+    if (event.id !== network.id && attacker && attacker.distance < game.distance &&
+        game.distance - attacker.distance < 120) weaponHit('pulse');
+  } else if (event.item === 'banana' && Number.isFinite(event.distance) && Number.isFinite(event.lateral)) {
+    const placed = { ownerId: event.id, distance: event.distance, lateral: event.lateral,
+      age: 0, mesh: weaponMesh('banana') };
+    placed.mesh.position.copy(weaponPosition(placed.distance, placed.lateral, .43));
+    bananaTraps.push(placed);
+  } else if ((event.item === 'ball' || event.item === 'pie') && Number.isFinite(event.fromDistance)) {
+    const shot = { kind: event.item, targetId: event.targetId, fromDistance: event.fromDistance,
+      fromLateral: event.fromLateral, toDistance: event.toDistance, toLateral: event.toLateral,
+      age: 0, duration: .85, mesh: weaponMesh(event.item) };
+    projectiles.push(shot);
+    if (event.id === network.id) toast(event.item === 'ball' ? 'ยิงลูกบอลเด้ง! 🏐' : 'ปาพายครีม! 🥧');
+  }
+}
+
+function updateWeapons(dt) {
+  for (let i = bananaTraps.length - 1; i >= 0; i--) {
+    const trap = bananaTraps[i];
+    trap.age += dt;
+    trap.mesh.rotation.y += dt * .8;
+    if (game.mode === 'racing' && trap.ownerId !== (onlineRace ? network.id : 'me') &&
+        Math.abs(game.distance - trap.distance) < 2.5 && Math.abs(game.lateral - trap.lateral) < 2.1) {
+      weaponHit('banana');
+      removeWeapon(trap); bananaTraps.splice(i, 1);
+    } else if (!onlineRace && game.ai.some(ai => Math.abs(ai.distance - trap.distance) < 2.5 &&
+        Math.abs(ai.lateral - trap.lateral) < 2.1 && (ai.slowTime = 2.5))) {
+      removeWeapon(trap); bananaTraps.splice(i, 1);
+    } else if (trap.age > 18) {
+      removeWeapon(trap); bananaTraps.splice(i, 1);
+    }
+  }
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const shot = projectiles[i];
+    shot.age += dt;
+    const t = Math.min(1, shot.age / shot.duration);
+    const target = onlineRace ? connectedPlayers.find(player => player.id === shot.targetId) :
+      typeof shot.targetId === 'number' ? game.ai[shot.targetId] : null;
+    const endDistance = shot.targetId === (onlineRace ? network.id : 'me') ? game.distance : target?.distance ?? shot.toDistance;
+    const endLateral = shot.targetId === (onlineRace ? network.id : 'me') ? game.lateral : target?.lateral ?? shot.toLateral;
+    shot.mesh.position.copy(weaponPosition(lerp(shot.fromDistance, endDistance, t),
+      lerp(shot.fromLateral, endLateral, t), 2 + Math.sin(t * Math.PI) * 5));
+    shot.mesh.rotation.x += dt * 10;
+    shot.mesh.rotation.z += dt * 6;
+    if (t >= 1) {
+      if (shot.targetId === (onlineRace ? network.id : 'me') && game.mode === 'racing') weaponHit(shot.kind);
+      else if (!onlineRace && target) target.slowTime = shot.kind === 'pie' ? 3.5 : 2.4;
+      removeWeapon(shot); projectiles.splice(i, 1);
+    }
+  }
+}
+
 function useBoost() {
   if ((earnedPower || (selectedMode === 'item' && heldItem)) && game.mode === 'racing') {
     const item = earnedPower || heldItem;
@@ -1412,16 +1589,29 @@ function useBoost() {
     else heldItem = null;
     if (item === 'nitro') { game.boostTime = 3.5 * selectedKart.boost; toast('ไนโตรแรงเต็มพิกัด! 🔥'); }
     else if (item === 'shield') { shieldTime = 7; toast('โล่ป้องกันพร้อม! 🛡️'); }
-    else {
+    else if (item === 'pulse') {
       pulseTime = 0;
       playerKart.userData.waveTime = 1;
       if (!onlineRace) game.ai.forEach(ai => {
         if (ai.distance > game.distance && ai.distance - game.distance < 120) ai.slowTime = 2.5;
       });
       toast('ปล่อยคลื่นพลัง! ⚡');
+    } else if (item === 'banana' || item === 'ball' || item === 'pie') {
+      if (!onlineRace) {
+        const rivals = game.ai.map((ai, index) => ({ ...ai, index }))
+          .filter(ai => Math.abs(ai.distance - game.distance) < 180)
+          .sort((a, b) => Math.abs(a.distance - game.distance) - Math.abs(b.distance - game.distance));
+        handleWeaponEvent(item === 'banana' ?
+          { id: 'me', item, distance: game.distance - 6, lateral: game.lateral } :
+          { id: 'me', item, targetId: rivals[0]?.index ?? null,
+            fromDistance: game.distance, fromLateral: game.lateral,
+            toDistance: rivals[0]?.distance ?? game.distance + 65,
+            toLateral: rivals[0]?.lateral ?? game.lateral });
+      }
+      if (item === 'banana') toast('วางเปลือกกล้วยไว้ด้านหลัง! 🍌');
     }
     if (onlineRace && (selectedMode === 'item' || learningEnabled)) network.send({ type: 'item', item });
-    audio.cue(item === 'shield' ? 'shield' : item === 'pulse' ? 'pulse' : 'boost');
+    audio.cue(['shield', 'pulse', 'banana', 'ball', 'pie'].includes(item) ? item : 'boost');
     updateHud();
     return;
   }
@@ -1459,6 +1649,7 @@ function update(dt) {
     game.raceTime += dt;
     shieldTime = Math.max(0, shieldTime - dt);
     pulseTime = Math.max(0, pulseTime - dt);
+    hitTime = Math.max(0, hitTime - dt);
     const accelerating = keys.gas;
     const steer = clamp(Number(keys.right) - Number(keys.left) + touchSteer, -1, 1);
     const drifting = keys.drift && Math.abs(steer) > 0 && game.speed > 13;
@@ -1466,6 +1657,7 @@ function update(dt) {
     game.speed += ((accelerating ? 27 * selectedKart.acceleration : -24) -
       game.speed * (game.boostTime > 0 ? .03 : .08)) * dt;
     if (pulseTime > 0) game.speed -= 26 * dt;
+    if (hitTime > 0) game.speed -= (hitKind === 'pie' ? 35 : 46) * dt;
     if (game.boostTime > 0) {
       game.boostTime = Math.max(0, game.boostTime - dt);
       game.speed += 27 * dt;
@@ -1475,7 +1667,8 @@ function update(dt) {
     game.distance += game.speed * Math.cos(game.heading) * dt;
     game.steerMomentum = lerp(game.steerMomentum, steer, 1 - Math.exp(-dt * (drifting ? 7 : 10)));
     const targetHeading = game.steerMomentum * selectedKart.steering * (drifting ? .26 : .19) *
-      (.48 + .52 * game.speed / MAX_SPEED) - clamp(game.lateral / ROAD_HALF, -1, 1) * .018;
+      (.48 + .52 * game.speed / MAX_SPEED) - clamp(game.lateral / ROAD_HALF, -1, 1) * .018 +
+      (hitTime > 0 ? Math.sin(game.raceTime * 20) * .045 : 0);
     game.heading = lerp(game.heading, targetHeading, 1 - Math.exp(-dt * (drifting ? 3.7 : 6)));
     const targetSlide = game.speed * Math.sin(game.heading) * (drifting ? .49 : .43);
     game.lateralVelocity = lerp(game.lateralVelocity, targetSlide, 1 - Math.exp(-dt * (drifting ? 2.4 : 5)));
@@ -1518,7 +1711,7 @@ function update(dt) {
       if (marker > lastItem) {
         lastItem = marker;
         if (!heldItem) {
-          heldItem = ['nitro', 'shield', 'pulse'][marker % 3];
+          heldItem = ITEM_REWARDS[marker % ITEM_REWARDS.length];
           toast('เก็บไอเท็มแล้ว! 🎁');
         }
       }
@@ -1530,7 +1723,8 @@ function update(dt) {
       if (lastNetworkState >= .1) {
         lastNetworkState = 0;
         network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
-          speed: game.speed, boost: game.boostTime > 0, shield: shieldTime > 0 });
+          speed: game.speed, boost: game.boostTime > 0, shield: shieldTime > 0,
+          held: earnedPower || heldItem });
       }
     }
     if (game.distance >= trackLength * RACE_LAPS) {
@@ -1542,7 +1736,7 @@ function update(dt) {
 
   const at = syncKart(playerKart, game.distance, game.lateral,
     game.steerMomentum * (keys.drift ? 1.5 : 1), game.boostTime > 0,
-    game.heading, game.speed, dt, shieldTime > 0);
+    game.heading, game.speed, dt, shieldTime > 0, earnedPower || heldItem);
   for (let i = 0; i < game.ai.length; i++) {
     const ai = game.ai[i];
     if (!onlineRace) syncKart(opponents[i], ai.distance, ai.lateral,
@@ -1556,6 +1750,7 @@ function update(dt) {
       lastSmoke = 0;
     }
   }
+  updateWeapons(dt);
   updateSmoke(dt);
   updateCamera(at, dt);
 }

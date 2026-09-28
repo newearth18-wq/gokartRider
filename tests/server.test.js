@@ -120,3 +120,45 @@ test('host question bank reaches joining riders and rejects malformed exams', { 
     child.kill();
   }
 });
+
+test('room broadcasts banana traps and targets ball and pie at another rider', { timeout: 12000 }, async () => {
+  const port = await availablePort();
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' }, stdio: 'ignore',
+  });
+  const clients = [];
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/health`); break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 40)); }
+    }
+    const url = `ws://127.0.0.1:${port}/race`;
+    const host = await open(url), rider = await open(url);
+    clients.push(host, rider);
+    const first = waitMessage(host, data => data.type === 'welcome');
+    host.send(JSON.stringify({ type: 'create', name: 'Host', mode: 'item' }));
+    const room = await first;
+    const second = waitMessage(rider, data => data.type === 'welcome');
+    rider.send(JSON.stringify({ type: 'join', code: room.code, name: 'Friend' }));
+    const friend = await second;
+    const racing = waitMessage(host, data => data.type === 'snapshot', 7000);
+    host.send(JSON.stringify({ type: 'start' }));
+    await racing;
+    host.send(JSON.stringify({ type: 'state', distance: 45, lateral: 3, speed: 30, held: 'banana' }));
+    rider.send(JSON.stringify({ type: 'state', distance: 55, lateral: 1, speed: 35 }));
+    const trap = waitMessage(rider, data => data.type === 'item' && data.item === 'banana');
+    host.send(JSON.stringify({ type: 'item', item: 'banana' }));
+    assert.deepEqual({ distance: (await trap).distance, lateral: 3 }, { distance: 39, lateral: 3 });
+    await new Promise(resolve => setTimeout(resolve, 1050));
+    const ball = waitMessage(rider, data => data.type === 'item' && data.item === 'ball');
+    host.send(JSON.stringify({ type: 'item', item: 'ball' }));
+    assert.equal((await ball).targetId, friend.id);
+    await new Promise(resolve => setTimeout(resolve, 1050));
+    const pie = waitMessage(rider, data => data.type === 'item' && data.item === 'pie');
+    host.send(JSON.stringify({ type: 'item', item: 'pie' }));
+    assert.equal((await pie).targetId, friend.id);
+  } finally {
+    for (const client of clients) client.close();
+    child.kill();
+  }
+});

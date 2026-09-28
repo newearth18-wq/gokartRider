@@ -44,10 +44,10 @@ export const CHARACTERS = [
 
 // Performance numbers are local driving characteristics. All racers share the same track and laps.
 export const KARTS = [
-  { id: 'comet', name: 'คอมเม็ต', icon: '🏎️', skill: 'สมดุลทุกทาง', acceleration: 1, topSpeed: 1, steering: 1, boost: 1, style: 'sport' },
-  { id: 'rocket', name: 'ร็อกเก็ต', icon: '🚀', skill: 'ทางตรงเร็ว · ไนโตรนาน', acceleration: 1.06, topSpeed: 1.13, steering: .91, boost: 1.35, style: 'rocket' },
-  { id: 'grip', name: 'กริปเปอร์', icon: '🛞', skill: 'เข้าโค้งนิ่ง · คืนตัวไว', acceleration: .98, topSpeed: .96, steering: 1.24, boost: .9, style: 'grip' },
-  { id: 'flash', name: 'แฟลช', icon: '⚡', skill: 'ออกตัวไว · ดริฟต์ชาร์จเร็ว', acceleration: 1.23, topSpeed: .98, steering: 1.06, boost: 1, style: 'flash' },
+  { id: 'comet', name: 'คอมเม็ต', icon: '🏎️', skill: 'สปอร์ตเปิดประทุน · สมดุลทุกทาง', acceleration: 1, topSpeed: 1, steering: 1, boost: 1, style: 'sport', trim: 0x5ee5ff },
+  { id: 'rocket', name: 'ร็อกเก็ต', icon: '🚀', skill: 'จรวดปีกคู่ · ทางตรงเร็ว', acceleration: 1.06, topSpeed: 1.13, steering: .91, boost: 1.35, style: 'rocket', trim: 0xff743d },
+  { id: 'grip', name: 'กริปเปอร์', icon: '🛞', skill: 'รถลุยล้อโต · เข้าโค้งนิ่ง', acceleration: .98, topSpeed: .96, steering: 1.24, boost: .9, style: 'grip', trim: 0x76ed6b },
+  { id: 'flash', name: 'แฟลช', icon: '⚡', skill: 'สูตรหนึ่งไฟฟ้า · ออกตัวไว', acceleration: 1.23, topSpeed: .98, steering: 1.06, boost: 1, style: 'flash', trim: 0xffe34d },
 ];
 
 export const MAX_PLAYERS = 50;
