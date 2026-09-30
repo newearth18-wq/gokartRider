@@ -1,11 +1,13 @@
 import * as THREE from './vendor/three.module.js';
-import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=10-0';
-import { settleRoadEdge, steerThroughCurve } from './driving.mjs?v=10-0';
-import { resolveKartCollision } from './collision.mjs?v=12-0';
+import { TRACKS, CHARACTERS, KARTS, MAX_PLAYERS, RACE_LAPS } from './config.js?v=15-0';
+import { settleRoadEdge, steerThroughCurve } from './driving.mjs?v=15-0';
+import { resolveKartCollision } from './collision.mjs?v=15-0';
+import { buildTrackDetails } from './track-world.js?v=15-0';
+import { applyTrackFeatures, advanceJump, rampHeight, surfaceAt, featureGap, FEATURE_INFO } from './track-features.mjs?v=15-0';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
-import { GameAudio } from './audio.js?v=13-0';
+import { GameAudio } from './audio.js?v=15-0';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -53,6 +55,12 @@ let scene;
 let camera;
 let curve;
 let trackLength;
+let trackDetails;
+let featureVisits = new Map();
+let raceStartAt = 0;
+let tourIndex = 0;
+let tourMoving = true;
+let lastSurface = null;
 let playerKart;
 let previewRenderer;
 let previewScene;
@@ -141,7 +149,7 @@ function freshGame() {
     mode: 'menu', countdown: 3, distance: 0, speed: 0, lateral: 0,
     steerMomentum: 0, heading: 0, lateralVelocity: 0,
     driftCharge: 0, boostTime: 0, raceTime: 0,
-    crashShake: 0,
+    crashShake: 0, airHeight: 0, airVelocity: 0, trackBumpId: 0,
     offRoadNotified: false, cameraReady: false,
     ai: AI_COLORS.map((color, i) => ({
       color, distance: 9 + i * 6, lateral: [-3, 2, .1, -2, 3, -1, 1][i],
@@ -440,6 +448,8 @@ function createScenery() {
   const foliage = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const trunks = new THREE.InstancedMesh(trunkGeo, makeMaterial(isSnow ? 0x71888a : 0x7e624a, 1), vegetationCount);
   const crowns = new THREE.InstancedMesh(leafGeo, foliage, vegetationCount);
+  const snowCaps = isSnow ? new THREE.InstancedMesh(new THREE.ConeGeometry(1.95, 3.5, 12),
+    makeMaterial(0xf8fdff), vegetationCount) : null;
   const dummy = new THREE.Object3D();
   let seed = 12345;
   const random = () => { seed = (seed * 1103515245 + 12345) >>> 0; return seed / 4294967296; };
@@ -455,6 +465,10 @@ function createScenery() {
     dummy.position.y = position.y + scale * (isCanyon ? 4.1 : 5.3);
     if (!isSnow && !isCanyon) dummy.scale.set(scale * 1.7, scale * 1.3, scale * 1.7);
     dummy.updateMatrix(); crowns.setMatrixAt(i, dummy.matrix);
+    if (snowCaps) {
+      dummy.position.y += scale * 1.05;
+      dummy.updateMatrix(); snowCaps.setMatrixAt(i, dummy.matrix);
+    }
     const leafColor = new THREE.Color(selectedTrack.foliage);
     leafColor.offsetHSL((random() - .5) * .09, random() * .12, (random() - .5) * .20);
     crowns.setColorAt(i, leafColor);
@@ -462,6 +476,7 @@ function createScenery() {
   trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
   crowns.instanceColor.needsUpdate = true;
   scene.add(trunks, crowns);
+  if (snowCaps) { snowCaps.instanceMatrix.needsUpdate = true; scene.add(snowCaps); }
 
   const pennantColors = [0xffde42, 0xff6c9b, 0x4de9eb, 0x926dff].map(color => makeMaterial(color, .45));
   const poleMaterial = makeMaterial(0xf3f9ff, .45);
@@ -481,6 +496,7 @@ function createScenery() {
     isSnow ? [0xf2f8ff, 0xd6e8f2, 0xb5d8ec, 0xffffff] :
     isCanyon ? [0xc77a50, 0xd59c64, 0xe8b879, 0xb9644c] :
     [0xffcb73, 0xf7e5c0, 0x9ed9dd, 0xe89fa9];
+  const windowMatrices = [], sillMatrices = [];
   for (let i = 0; i < (isHarbor ? 45 : isCanyon ? 10 : 25); i++) {
     const at = pose(trackLength * ((i * .193 + .07) % 1));
     const side = i % 2 ? -1 : 1;
@@ -496,15 +512,36 @@ function createScenery() {
       const roof = mesh(new THREE.ConeGeometry(5.2, 3, 4), makeMaterial(isSnow ? 0xeafaff : 0x9d6074), home, 0, height + 1.3, 0);
       roof.rotation.y = Math.PI / 4;
     }
-    box(home, 1.7, 1.7, .08, makeMaterial(0x79cfe7), -1.3, 3.1, 3.05);
-    box(home, 1.7, 1.7, .08, makeMaterial(0x79cfe7), 1.3, 3.1, 3.05);
     const trim = makeMaterial(isSnow ? 0xd2eaff : 0xfff2d6, .8);
-    box(home, 1.95, .18, .16, trim, -1.3, 4.02, 3.16);
-    box(home, 1.95, .18, .16, trim, 1.3, 4.02, 3.16);
+    home.updateMatrix();
+    for (let floor = 0; floor < (isHarbor ? Math.floor(height / 3) : 1); floor++) {
+      for (let face = 0; face < 4; face++) {
+        const rotation = new THREE.Matrix4().makeRotationY(face * Math.PI / 2);
+        for (const x of [-1.45, 1.45]) {
+          const position = new THREE.Vector3(x, 3.0 + floor * 3, 3.06).applyMatrix4(rotation);
+          const window = new THREE.Object3D(); window.position.copy(position); window.rotation.y = face * Math.PI / 2;
+          window.updateMatrix(); windowMatrices.push(new THREE.Matrix4().multiplyMatrices(home.matrix, window.matrix));
+          window.position.y -= .96; window.updateMatrix();
+          sillMatrices.push(new THREE.Matrix4().multiplyMatrices(home.matrix, window.matrix));
+        }
+      }
+    }
+    if (isHarbor) {
+      box(home, 6.6, .4, 6.6, trim, 0, height + .2, 0);
+      box(home, 3.6, 1.1, 3.6, makeMaterial(0x284c74), 0, height + .9, 0);
+    }
     box(home, 1.4, 2.35, .12, makeMaterial(0x8e5f65, .8), 0, 1.2, 3.1);
     box(home, 6.6, .18, .4, trim, 0, .2, 3.1);
     scene.add(home);
   }
+  const windows = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7, 1.7, .08),
+    makeMaterial(isHarbor ? 0x12689b : 0x63c8e8, .25), windowMatrices.length);
+  const sills = new THREE.InstancedMesh(new THREE.BoxGeometry(1.95, .18, .16),
+    makeMaterial(0xfff4dc), sillMatrices.length);
+  windowMatrices.forEach((matrix, i) => windows.setMatrixAt(i, matrix));
+  sillMatrices.forEach((matrix, i) => sills.setMatrixAt(i, matrix));
+  windows.instanceMatrix.needsUpdate = sills.instanceMatrix.needsUpdate = true;
+  scene.add(windows, sills);
 
   const mountainMaterials = [selectedTrack.mountain,
     new THREE.Color(selectedTrack.mountain).multiplyScalar(.8),
@@ -540,9 +577,10 @@ function createScenery() {
     const caveMaterial = makeMaterial(0xa45f45, 1);
     for (let i = 0; i < 13; i++) {
       const at = pose(trackLength * .34 + i * 6);
-      const arch = mesh(new THREE.TorusGeometry(ROAD_HALF + 8, 3.2, 8, 22), caveMaterial, scene,
-        at.point.x, at.point.y + 9.5, at.point.z);
+      const arch = mesh(new THREE.TorusGeometry(ROAD_HALF + 8, 3.2, 8, 28, Math.PI), caveMaterial, scene,
+        at.point.x, at.point.y, at.point.z);
       arch.rotation.y = Math.atan2(at.tangent.x, at.tangent.z);
+      arch.scale.y = .7;
     }
     for (let i = 0; i < 45; i++) {
       const at = pose(trackLength * ((i * .137 + .03) % 1));
@@ -621,6 +659,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
       opacity: lite ? .43 : .60, depthWrite: false, polygonOffset: true,
       polygonOffsetFactor: -1 }), group, 0, -.105, 0);
   shadow.rotation.x = -Math.PI / 2;
+  shadow.userData.baseOpacity = lite ? .43 : .60;
 
   box(chassis, 2.6, .28, 3.7, dark, 0, .64, 0);
   const shell = mesh(new THREE.SphereGeometry(1, lite ? 12 : 24, lite ? 8 : 14), body, chassis, 0, .98, .1);
@@ -986,6 +1025,8 @@ function buildWorld() {
   createCurve();
   createRoad();
   createScenery();
+  trackDetails = buildTrackDetails(scene, selectedTrack, pose, trackLength, ROAD_HALF);
+  featureVisits.clear();
   itemPickups = [];
   if (selectedMode === 'item') createItemPickups();
   playerKart = createKart(appearance.paint, selectedCharacter, false, { ...appearance, model: selectedKart.id });
@@ -1009,7 +1050,7 @@ function buildWorld() {
   game = freshGame();
 }
 
-function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false, weapon = null, effect = null) {
+function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0, speed = 0, dt = 0, shield = false, weapon = null, effect = null, airHeight = 0, airVelocity = 0) {
   const at = pose(distance);
   kart.position.copy(at.point).addScaledVector(at.right, lateral);
   const parts = kart.userData;
@@ -1017,12 +1058,14 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
   const motion = Math.min(1, speed / MAX_SPEED);
   kart.position.y += .16 + (parts.modelStyle === 'hover' ? .48 + Math.sin(parts.animationTime * 3.8) * .07 : 0) +
     Math.sin(parts.animationTime * (10 + speed * .24)) * .025 * motion;
+  kart.position.y += airHeight + rampHeight({ distance, lateral, airHeight }, trackDetails.features, trackLength);
   kart.rotation.y = Math.atan2(at.tangent.x, at.tangent.z) - heading;
   parts.baseRotationZ = lerp(parts.baseRotationZ, -lean * .19, Math.min(1, dt * 9));
   parts.baseRotationX = lerp(parts.baseRotationX, -motion * .025 - (boost ? .045 : 0), Math.min(1, dt * 5));
   parts.baseRotationY = lerp(parts.baseRotationY, lean * (boost ? .09 : .15), Math.min(1, dt * 7));
   const effectProgress = effect?.time > 0 ? 1 - effect.time / HIT_DURATIONS[effect.kind] : 0;
   parts.chassis.rotation.set(parts.baseRotationX, parts.baseRotationY, parts.baseRotationZ);
+  if (airHeight > 0) parts.chassis.rotation.x += clamp(-airVelocity * .025, -.22, .22);
   parts.crashTime = Math.max(0, (parts.crashTime || 0) - dt);
   if (parts.crashTime > 0) {
     const strength = parts.crashTime / .55;
@@ -1071,6 +1114,7 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
     parts.pulseRing.material.opacity = .5 + Math.sin(parts.animationTime * 30) * .3;
   }
   parts.shadow.position.y = at.point.y + .045 - kart.position.y;
+  parts.shadow.material.opacity = (parts.shadow.userData.baseOpacity || .6) / (1 + airHeight * .2);
   return at;
 }
 
@@ -1115,8 +1159,14 @@ function syncRemoteKarts(dt) {
       kart.userData.crashTime = .55;
       spawnImpactBurst(player.distance, player.lateral, 'crash');
     }
+    if (player.trackBumpId && player.trackBumpId !== kart.userData.remoteTrackBumpId) {
+      kart.userData.remoteTrackBumpId = player.trackBumpId;
+      kart.userData.crashTime = .55;
+      spawnImpactBurst(player.distance, player.lateral, 'crash');
+    }
+    kart.userData.airHeight = lerp(kart.userData.airHeight || 0, player.airHeight || 0, Math.min(1, dt * 12));
     syncKart(kart, kart.userData.distance, kart.userData.lateral, 0, player.boost, 0, player.speed || 0, dt, player.shield, player.held,
-      { kind: kart.userData.remoteHitKind, time: kart.userData.remoteHitTime });
+      { kind: kart.userData.remoteHitKind, time: kart.userData.remoteHitTime }, kart.userData.airHeight, player.airVelocity || 0);
   }
   for (const [id, kart] of remoteKarts) {
     if (active.has(id)) continue;
@@ -1141,7 +1191,7 @@ function updateCamera(at, dt) {
   const behind = at.tangent.clone().multiplyScalar(-12.8);
   const desired = at.point.clone().add(behind)
     .addScaledVector(at.right, game.lateral - game.lateralVelocity * .08)
-    .add(new THREE.Vector3(0, 5.9 - Math.min(.6, game.speed / MAX_SPEED * .6), 0));
+    .add(new THREE.Vector3(0, 5.9 - Math.min(.6, game.speed / MAX_SPEED * .6) + game.airHeight * .4, 0));
   game.crashShake = Math.max(0, game.crashShake - dt);
   if (game.crashShake > 0) {
     const shake = game.crashShake / .42;
@@ -1150,7 +1200,7 @@ function updateCamera(at, dt) {
   }
   const target = at.point.clone().addScaledVector(at.tangent, 19)
     .addScaledVector(at.right, game.lateral + game.steerMomentum * 2)
-    .add(new THREE.Vector3(0, 1.8, 0));
+    .add(new THREE.Vector3(0, 1.8 + game.airHeight * .45, 0));
   if (!game.cameraReady) {
     camera.position.copy(desired);
     game.cameraReady = true;
@@ -1323,6 +1373,8 @@ function prepareQrJoin(code) {
   $('#inviteNotice').hidden = true;
   prepareStudentName();
   ui.menu.hidden = false;
+  $('#trackTour').hidden = true;
+  $('#speedFx').classList.remove('active');
   ui.menu.querySelector('.menu-card').scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1500,6 +1552,9 @@ function resetRace(online = false, startAt = 0) {
   audio.start();
   game = freshGame();
   onlineRace = online;
+  raceStartAt = startAt;
+  featureVisits.clear(); lastSurface = null;
+  $('#trackTour').hidden = true;
   if (!online) raceQuestions = questionBank;
   if (online) {
     const spawn = connectedPlayers.find(player => player.id === network.id);
@@ -1673,6 +1728,8 @@ function returnToMenu() {
   ui.pause.hidden = true;
   ui.roomBadge.hidden = true;
   ui.menu.hidden = false;
+  $('#trackTour').hidden = true;
+  $('#speedFx').classList.remove('active');
   learningEnabled = $('#learningToggle').checked;
   buildWorld();
   renderChoices();
@@ -1696,6 +1753,7 @@ function showQuiz() {
   resetTouchSteering();
   if (onlineRace) network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
     speed: 0, boost: false, shield: shieldTime > 0, held: earnedPower || heldItem,
+    airHeight: game.airHeight, airVelocity: game.airVelocity,
     hitKind, hitTime, hitId });
   $('#quizQuestion').textContent = question.question;
   $('#quizReward').textContent = `ตอบถูกได้ ${POWERS[reward].icon} ${POWERS[reward].name}`;
@@ -2030,12 +2088,12 @@ function updateWeapons(dt) {
     trap.age += dt;
     trap.mesh.rotation.y += dt * .8;
     trap.mesh.position.y += Math.sin(trap.age * 8) * dt * .4;
-    if (game.mode === 'racing' && trap.ownerId !== (onlineRace ? network.id : 'me') &&
+    if (game.mode === 'racing' && game.airHeight < 1 && trap.ownerId !== (onlineRace ? network.id : 'me') &&
         Math.abs(game.distance - trap.distance) < 2.5 && Math.abs(game.lateral - trap.lateral) < 2.1) {
       weaponHit('banana');
       removeWeapon(trap); bananaTraps.splice(i, 1);
     } else if (!onlineRace && game.ai.some(ai => {
-      if (Math.abs(ai.distance - trap.distance) >= 2.5 || Math.abs(ai.lateral - trap.lateral) >= 2.1) return false;
+      if ((ai.airHeight || 0) >= 1 || Math.abs(ai.distance - trap.distance) >= 2.5 || Math.abs(ai.lateral - trap.lateral) >= 2.1) return false;
       applyAiHit(ai, 'banana');
       return true;
     })) {
@@ -2115,6 +2173,67 @@ function useBoost() {
   toast('TURBO BOOST! ⚡', 1.1);
 }
 
+function trackTime() {
+  return onlineRace && raceStartAt ? Math.max(0, (Date.now() - raceStartAt) / 1000) : game.raceTime;
+}
+
+function updateTrackContacts(racer, previous, dt, local = false) {
+  const visits = local ? featureVisits : (racer.featureVisits ||= new Map());
+  const landed = advanceJump(racer, dt);
+  const events = applyTrackFeatures(racer, previous, trackDetails.features, trackLength,
+    trackTime(), dt, visits, local && shieldTime > 0);
+  if (landed && local) {
+    audio.cue('land'); game.crashShake = .13;
+    const at = pose(racer.distance);
+    for (const side of [-1, 1]) {
+      const point = at.point.clone().addScaledVector(at.right, racer.lateral + side * 1.5);
+      point.y += .25;
+      spawnVisualParticle(point, 0xffffff, .55, .8, .65, .35,
+        at.right.clone().multiplyScalar(side * 3));
+    }
+  }
+  for (const event of events) {
+    if (event.kind === 'obstacle') {
+      if (local) {
+        game.crashShake = .42; playerKart.userData.crashTime = .55;
+        game.trackBumpId++;
+        toast(`${FEATURE_INFO[event.feature.kind].label}! เลี้ยวหลบแล้วขับต่อ`, 1.4);
+        audio.cue(shieldTime > 0 ? 'blocked' : 'collision');
+      }
+      if (Math.abs(racer.distance - game.distance) < 160)
+        spawnImpactBurst(racer.distance, racer.lateral, 'crash');
+    } else if (local) {
+      audio.cue(event.kind === 'jump' ? 'jump' : 'boost');
+      toast(event.kind === 'jump' ? 'ขึ้นทางกระโดด! ↗' : 'แผ่นเร่งความเร็ว! ⚡', 1.2);
+    }
+  }
+}
+
+function startTrackTour() {
+  onlineRace = false; game = freshGame(); game.mode = 'tour';
+  shieldTime = hitTime = 0; hitKind = null;
+  featureVisits.clear(); tourIndex = 0; lastSurface = null; tourMoving = true;
+  $('#tourPauseButton').textContent = 'หยุดชม';
+  $('#tourPauseButton').setAttribute('aria-pressed', 'false');
+  ui.menu.hidden = true; ui.hud.hidden = true; ui.touch.hidden = true;
+  ui.pause.hidden = true; ui.countdown.hidden = true; $('#trackTour').hidden = false;
+  opponents.forEach(kart => { kart.visible = false; });
+  Object.keys(keys).forEach(key => { keys[key] = false; });
+  audio.start(); seekTourFeature();
+}
+
+function seekTourFeature() {
+  const feature = trackDetails.features[tourIndex];
+  game.distance = feature.distance - feature.length / 2 - 36;
+  game.lateral = feature.lateral; game.speed = 38; game.heading = 0;
+  game.airHeight = game.airVelocity = game.boostTime = 0;
+  game.cameraReady = false; game.cameraTarget = null;
+  featureVisits.clear();
+  $('#tourTitle').textContent = `${selectedTrack.name} · ${tourIndex + 1}/${trackDetails.features.length}`;
+  $('#tourFeature').textContent = FEATURE_INFO[feature.kind].label;
+  $('#tourHint').textContent = FEATURE_INFO[feature.kind].hint;
+}
+
 function update(dt) {
   if (performance.now() > toastUntil) ui.toast.hidden = true;
   if (activeQuiz && onlineRace) {
@@ -2146,13 +2265,19 @@ function update(dt) {
     const stunned = hitTime > 0 && (hitKind === 'pie' && hitTime > 1.05 ||
       hitKind === 'ball' && hitTime > 1.0 || hitKind === 'pulse' && hitTime > .9);
     const accelerating = keys.gas && !stunned;
+    const surface = surfaceAt(game, trackDetails.features, trackLength);
+    if (surface !== lastSurface) {
+      if (surface) toast(surface === 'ice' ? 'น้ำแข็งลื่น · เลี้ยวล่วงหน้า ❄️' : 'ทรายหนืด · เลี่ยงไปเลนยางมะตอย', 1.5);
+      lastSurface = surface;
+    }
     const steer = clamp(Number(keys.right) - Number(keys.left) + touchSteer, -1, 1);
-    const effectiveSteer = stunned ? 0 : hitTime > 0 && hitKind === 'banana' ? steer * .27 : steer;
+    const effectiveSteer = (stunned ? 0 : hitTime > 0 && hitKind === 'banana' ? steer * .27 : steer) * (surface === 'ice' ? .78 : 1);
     const drifting = keys.drift && hitTime <= 0 && Math.abs(steer) > 0 && game.speed > 13;
-    const cap = MAX_SPEED * selectedKart.topSpeed * (game.boostTime > 0 ? 1.3 : 1);
+    const cap = MAX_SPEED * selectedKart.topSpeed * (game.boostTime > 0 ? 1.3 : 1) * (surface === 'sand' ? .72 : 1);
     game.speed += ((accelerating ? 27 * selectedKart.acceleration : -24) -
       game.speed * (game.boostTime > 0 ? .03 : .08)) * dt;
     if (pulseTime > 0) game.speed -= 26 * dt;
+    if (surface === 'sand') game.speed -= 14 * dt;
     if (hitTime > 0) game.speed -= (hitKind === 'banana' ? 17 : 54) * dt;
     if (game.boostTime > 0) {
       game.boostTime = Math.max(0, game.boostTime - dt);
@@ -2167,7 +2292,7 @@ function update(dt) {
     const curveTurn = Math.atan2(before.x * after.z - before.z * after.x,
       before.x * after.x + before.z * after.z);
     Object.assign(game, steerThroughCurve(game, effectiveSteer, game.speed, selectedKart.steering,
-      curveTurn, dt, drifting));
+      curveTurn, dt, drifting, surface === 'ice' ? .32 : game.airHeight > 0 ? .5 : 1));
     if (hitTime > 0 && hitKind === 'banana') {
       game.heading = clamp(game.heading + Math.sin(game.raceTime * 13) * .65 * dt, -.65, .65);
       game.lateralVelocity += Math.sin(game.raceTime * 13) * 14 * dt;
@@ -2177,6 +2302,7 @@ function update(dt) {
     game.lateral = settled.lateral;
     game.lateralVelocity = settled.lateralVelocity;
     game.speed = settled.speed;
+    updateTrackContacts(game, previousPosition, dt, true);
     if (Math.abs(game.lateral) > ROAD_HALF - 4.4 && !game.offRoadNotified) {
       toast('ใกล้ขอบทาง · เลี้ยวกลับเข้าถนน', 1.3);
       game.offRoadNotified = true;
@@ -2191,10 +2317,17 @@ function update(dt) {
       opponent.hitTime = Math.max(0, (opponent.hitTime || 0) - dt);
       const hitFactor = opponent.hitTime > 0 ?
         { banana: .4, ball: .12, pie: .08, pulse: .15 }[opponent.hitKind] || .4 : 1;
+      opponent.cruiseSpeed ||= opponent.speed;
+      opponent.boostTime = Math.max(0, (opponent.boostTime || 0) - dt);
+      const aiSurface = surfaceAt(opponent, trackDetails.features, trackLength);
+      opponent.speed = lerp(opponent.speed, opponent.cruiseSpeed *
+        (opponent.boostTime > 0 ? 1.28 : 1) * (aiSurface === 'sand' ? .72 : 1), Math.min(1, dt * 2));
+      const previous = { distance: opponent.distance, lateral: opponent.lateral };
       opponent.distance += opponent.speed * hitFactor * dt *
         (1 + Math.sin(game.raceTime * .32 + opponent.phase) * .045);
       opponent.lateral += (Math.sin(game.raceTime * .5 + opponent.phase) * 3.2 -
         opponent.lateral) * dt * .26;
+      updateTrackContacts(opponent, previous, dt);
       if (opponent.distance >= trackLength * RACE_LAPS) {
         opponent.distance = trackLength * RACE_LAPS;
         opponent.finishedAt = game.raceTime;
@@ -2220,6 +2353,7 @@ function update(dt) {
         lastNetworkState = 0;
         network.send({ type: 'state', distance: game.distance, lateral: game.lateral,
           speed: game.speed, boost: game.boostTime > 0, shield: shieldTime > 0,
+          airHeight: game.airHeight, airVelocity: game.airVelocity, trackBumpId: game.trackBumpId,
           held: earnedPower || heldItem, hitKind: hitTime > 0 ? hitKind : null, hitTime, hitId });
       }
     }
@@ -2228,19 +2362,33 @@ function update(dt) {
       finishRace();
     }
     updateHud();
+  } else if (game.mode === 'tour') {
+    game.raceTime += dt;
+    if (tourMoving) {
+      const previous = { distance: game.distance, lateral: game.lateral };
+      game.boostTime = Math.max(0, game.boostTime - dt);
+      game.speed = game.boostTime > 0 ? 58 : 38;
+      game.distance += game.speed * dt;
+      updateTrackContacts(game, previous, dt, true);
+      const feature = trackDetails.features[tourIndex];
+      if (featureGap(game.distance, feature, trackLength) > feature.length / 2 + 92) {
+        tourIndex = (tourIndex + 1) % trackDetails.features.length; seekTourFeature();
+      }
+    } else game.speed = 0;
   }
 
   const at = syncKart(playerKart, game.distance, game.lateral,
     game.steerMomentum * (keys.drift ? 1.5 : 1), game.boostTime > 0,
     game.heading, game.speed, dt, shieldTime > 0, earnedPower || heldItem,
-    { kind: hitKind, time: hitTime });
+    { kind: hitKind, time: hitTime }, game.airHeight, game.airVelocity);
   for (let i = 0; i < game.ai.length; i++) {
     const ai = game.ai[i];
     if (!onlineRace) syncKart(opponents[i], ai.distance, ai.lateral,
-      Math.sin(game.raceTime * .7 + ai.phase) * .15, false, 0, ai.speed, dt,
-      false, null, { kind: ai.hitKind, time: ai.hitTime });
+      Math.sin(game.raceTime * .7 + ai.phase) * .15, ai.boostTime > 0, 0, ai.speed, dt,
+      false, null, { kind: ai.hitKind, time: ai.hitTime }, ai.airHeight || 0, ai.airVelocity || 0);
   }
   if (onlineRace) syncRemoteKarts(dt);
+  trackDetails.animate(trackTime());
   for (const pickup of itemPickups) {
     pickup.rotation.y += dt * 1.25;
     pickup.position.y = pickup.userData.baseY + Math.sin(game.raceTime * 3 + pickup.userData.phase) * .25;
@@ -2252,7 +2400,7 @@ function update(dt) {
       lastSmoke = 0;
     }
   }
-  const boosting = game.mode === 'racing' && game.boostTime > 0;
+  const boosting = ['racing', 'tour'].includes(game.mode) && game.boostTime > 0;
   $('#speedFx').classList.toggle('active', boosting);
   if (boosting) {
     boostTrailTime += dt;
@@ -2306,7 +2454,7 @@ function drawMinimap() {
 function frame() {
   const dt = Math.min(.05, clock.getDelta());
   update(dt);
-  audio.update(game.speed, ['racing', 'countdown', 'quiz'].includes(game.mode), game.boostTime > 0);
+  audio.update(game.speed, ['racing', 'countdown', 'quiz', 'tour'].includes(game.mode), game.boostTime > 0);
   if (game.mode !== 'menu') drawMinimap();
   renderer.render(scene, camera);
   if (!ui.menu.hidden && previewRenderer) {
@@ -2342,6 +2490,10 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (!$('#questionEditor').hidden || !ui.menu.hidden || !ui.lobby.hidden) return;
+  if (game.mode === 'tour') {
+    if (event.key === 'Escape') returnToMenu();
+    return;
+  }
   if (event.key === 'Escape' || event.key.toLowerCase() === 'p') {
     if (!event.repeat) pauseRace();
     event.preventDefault(); return;
@@ -2582,6 +2734,16 @@ $('#studentJoinButton').addEventListener('click', () => connectRoom('join'));
 $('#lobbyStart').addEventListener('click', () => network.send({ type: 'start' }));
 $('#lobbyLeave').addEventListener('click', returnToMenu);
 $('#startButton').addEventListener('click', () => resetRace(false));
+$('#tourButton').addEventListener('click', startTrackTour);
+$('#tourNextButton').addEventListener('click', () => {
+  tourIndex = (tourIndex + 1) % trackDetails.features.length; seekTourFeature();
+});
+$('#tourExitButton').addEventListener('click', returnToMenu);
+$('#tourPauseButton').addEventListener('click', () => {
+  tourMoving = !tourMoving;
+  $('#tourPauseButton').textContent = tourMoving ? 'หยุดชม' : 'ชมต่อ';
+  $('#tourPauseButton').setAttribute('aria-pressed', String(!tourMoving));
+});
 $('#againButton').addEventListener('click', () => onlineRace ? returnToMenu() : resetRace(false));
 $('#restartButton').addEventListener('click', () => resetRace(false));
 $('#pauseButton').addEventListener('click', pauseRace);

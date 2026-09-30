@@ -1,4 +1,4 @@
-export function steerThroughCurve(state, steer, speed, steering, curveTurn, dt, drifting = false) {
+export function steerThroughCurve(state, steer, speed, steering, curveTurn, dt, drifting = false, grip = 1) {
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const momentum = state.steerMomentum + (steer - state.steerMomentum) *
     (1 - Math.exp(-dt * (drifting ? 7 : 10)));
@@ -7,10 +7,10 @@ export function steerThroughCurve(state, steer, speed, steering, curveTurn, dt, 
   const turnRate = momentum * steering * (drifting ? 1.22 : 1.08) *
     (.40 + .60 * Math.min(1, speed / 65));
   const heading = clamp((state.heading - curveTurn + turnRate * dt) *
-    Math.exp(-dt * (drifting ? .42 : .70)), -.75, .75);
+    Math.exp(-dt * (drifting ? .42 : .70) * grip), -.75, .75);
   const targetSlide = speed * Math.sin(heading) * (drifting ? .72 : .86);
   const lateralVelocity = state.lateralVelocity + (targetSlide - state.lateralVelocity) *
-    (1 - Math.exp(-dt * (drifting ? 2.7 : 6)));
+    (1 - Math.exp(-dt * (drifting ? 2.7 : 6) * grip));
   return { steerMomentum: momentum, heading, lateralVelocity };
 }
 

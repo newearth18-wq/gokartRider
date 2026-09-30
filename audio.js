@@ -128,6 +128,7 @@ export class GameAudio {
     const notes = {
       tick: [[660, .07]], go: [[520, .10], [780, .16]],
       boost: [[440, .08], [660, .10], [980, .20]],
+      jump: [[460, .06], [720, .08], [1080, .14]], land: [[180, .07], [100, .13]],
       correct: [[580, .09], [780, .11], [1040, .20]],
       wrong: [[280, .13], [220, .18]], finish: [[520, .10], [660, .10], [820, .10], [1040, .28]],
       shield: [[520, .1], [780, .18]], pulse: [[300, .08], [460, .08], [680, .15]],
@@ -159,7 +160,11 @@ export class GameAudio {
       tone.stop(at + duration + .01);
       at += duration * .82;
     }
-    if (['collision', 'crash', 'ballImpact'].includes(kind)) {
+    if (kind === 'jump') {
+      this.sweep(now, 250, 1100, .32, 'triangle', .06);
+    } else if (kind === 'land') {
+      this.noiseBurst(now, .14, 360, .055);
+    } else if (['collision', 'crash', 'ballImpact'].includes(kind)) {
       this.noiseBurst(now, kind === 'collision' ? .24 : .18, 520, .14);
       this.sweep(now, 190, 72, .23, 'sawtooth', .085);
     } else if (kind === 'pieImpact') {

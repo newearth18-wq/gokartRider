@@ -174,6 +174,12 @@ body.quiz-active .topbar,body.quiz-active .hud,body.quiz-active .touch-controls{
 @keyframes impact-pop{from{opacity:0;transform:translateY(-13vh) scale(.45) rotate(-14deg)}70%{opacity:1;transform:translateY(-13vh) scale(1.12) rotate(5deg)}to{transform:translateY(-13vh) scale(1) rotate(0)}}
 
 #results{padding:clamp(10px,3vw,24px)}
+.tour-button{display:block;width:100%;margin:10px 0 18px;padding:10px;border:1px solid #6de7ff88;border-radius:12px;background:#163b68;color:#d8f9ff;font:inherit;font-weight:700;cursor:pointer}
+.tour-button:hover{background:#205587}
+.track-tour{position:absolute;z-index:20;bottom:max(18px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:min(660px,94vw);padding:16px 20px;border:1px solid #94edff99;border-radius:18px;background:#102b52ed;box-shadow:0 8px 26px #051e4366;display:flex;justify-content:space-between;gap:18px;align-items:center}
+.track-tour[hidden]{display:none}.track-tour small,.track-tour strong,.track-tour span{display:block}.track-tour small{color:#a8dcf4;font-size:12px}.track-tour strong{color:#ffe456;font-size:21px}.track-tour span{font-size:13px;color:#e3faff}.track-tour nav{display:flex;flex-direction:column;gap:7px;flex:none}.track-tour button{border:0;border-radius:9px;padding:8px 13px;font:inherit;font-size:13px;font-weight:700;color:#123351;background:#ffe356;cursor:pointer}.track-tour button:last-child{background:#235583;color:#e1faff}
+@media(max-width:600px){.track-tour{padding:12px;gap:8px}.track-tour strong{font-size:16px}.track-tour span{font-size:11px}.track-tour button{padding:8px;font-size:11px}}
+@media(max-height:500px) and (min-width:601px){.track-tour{bottom:8px;padding:8px 12px;width:min(730px,94vw);gap:10px}.track-tour nav{flex-direction:row;gap:6px}.track-tour strong{font-size:16px}.track-tour small{font-size:10px}.track-tour span{font-size:11px}.track-tour button{padding:8px 10px;font-size:11px}}
 .results-card{width:min(96vw,720px);max-width:100%;min-width:0;max-height:90dvh;display:flex;flex-direction:column;align-items:center;padding:clamp(16px,3vw,30px);overflow:hidden}
 .results-card h2{font-size:clamp(26px,5vw,42px);margin:4px 0}.results-card .result-place{font-size:clamp(46px,8vw,76px)}
 .results-card #resultSummary{font-size:clamp(12px,1.6vw,16px);margin:6px 0 10px}

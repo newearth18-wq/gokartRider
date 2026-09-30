@@ -84,8 +84,13 @@ test('50 riders share a room and the 51st is rejected', { timeout: 30000 }, asyn
     assert.equal((await live).players.length, 50);
     const moved = waitMessage(clients[1], data => data.type === 'snapshot' &&
       data.players.some(player => player.id === welcome.id && player.distance >= 24));
-    host.send(JSON.stringify({ type: 'state', distance: 24, lateral: 2, speed: 30 }));
-    assert.equal((await moved).players.find(player => player.id === welcome.id).lateral, 2);
+    host.send(JSON.stringify({ type: 'state', distance: 24, lateral: 2, speed: 30,
+      airHeight: 3.2, airVelocity: 7, trackBumpId: 1 }));
+    const rider = (await moved).players.find(player => player.id === welcome.id);
+    assert.equal(rider.lateral, 2);
+    assert.equal(rider.airHeight, 3.2);
+    assert.equal(rider.airVelocity, 7);
+    assert.equal(rider.trackBumpId, 1);
   } finally {
     for (const client of clients) client.close();
     child.kill();

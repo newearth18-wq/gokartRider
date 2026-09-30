@@ -38,8 +38,8 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  const active = [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt, finishPlace, finishTime, quizCorrect, quizAttempted }) =>
-    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt, finishPlace, finishTime, quizCorrect, quizAttempted }));
+  const active = [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, airHeight, airVelocity, trackBumpId, finishedAt, finishPlace, finishTime, quizCorrect, quizAttempted }) =>
+    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, airHeight, airVelocity, trackBumpId, finishedAt, finishPlace, finishTime, quizCorrect, quizAttempted }));
   return active.concat([...room.results.values()].filter(player => !room.players.has(player.id)));
 }
 
@@ -110,6 +110,7 @@ function join(client, message) {
   client.distance = -Math.floor(slot / 4) * 6.5;
   client.lateral = [-6, -2, 2, 6][slot % 4];
   client.speed = 0;
+  client.airHeight = client.airVelocity = client.trackBumpId = 0;
   client.boost = client.shield = false;
   client.held = null;
   client.hitKind = null;
@@ -150,6 +151,7 @@ function handleMessage(client, message) {
       distance: Math.min(Math.max(client.distance - 2, distance), maxDistance),
       lateral: Math.max(-15.15, Math.min(15.15, lateral)),
       speed: Math.max(0, Math.min(105, speed)),
+      airHeight: Math.max(0, Math.min(6, Number(message.airHeight) || 0)),
       lateralVelocity: 0,
     };
     let collision = null;
@@ -165,6 +167,9 @@ function handleMessage(client, message) {
     client.distance = proposed.distance;
     client.lateral = proposed.lateral;
     client.speed = proposed.speed;
+    client.airHeight = proposed.airHeight;
+    client.airVelocity = Math.max(-20, Math.min(12, Number(message.airVelocity) || 0));
+    client.trackBumpId = Number.isSafeInteger(message.trackBumpId) && message.trackBumpId >= 0 ? message.trackBumpId : 0;
     if (collision) {
       const now = Date.now();
       if (collision.impact > 6 &&

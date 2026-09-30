@@ -5,6 +5,7 @@ export const KART_SIDE_GAP = 3.7;
 // Checking the path from previous to proposed position also stops fast karts
 // from stepping completely through another kart in one frame.
 export function resolveKartCollision(previous, proposed, rival, roadHalf = 17.5) {
+  if (Math.abs((proposed.airHeight || 0) - (rival.airHeight || 0)) > 2.4) return null;
   const oldGap = rival.distance - previous.distance;
   const newGap = rival.distance - proposed.distance;
   const oldSide = rival.lateral - previous.lateral;

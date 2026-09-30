@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=14-0" />
+    <link rel="stylesheet" href="style.css?v=15-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -60,6 +60,7 @@
           </div>
           <div class="selection-title track-selection-title"><strong>สนามแข่ง</strong><span id="trackCaption">สวนสายรุ้ง</span></div>
           <div id="trackChoices" class="track-choices" role="group" aria-label="เลือกสนาม"></div>
+          <button id="tourButton" class="tour-button" type="button">🎥 ชมสนามและลูกเล่น</button>
           <div class="selection-title race-selection-title"><strong>โหมดแข่ง</strong></div>
           <div class="race-modes" role="group" aria-label="เลือกโหมดแข่ง">
             <button class="race-mode active" data-race-mode="speed" type="button">⚡ สปีดเรซ</button>
@@ -115,6 +116,10 @@
       </section>
 
       <div id="countdown" class="countdown" aria-live="polite" hidden>3</div>
+      <section id="trackTour" class="track-tour" aria-label="ชมสนาม" hidden>
+        <div><small id="tourTitle"></small><strong id="tourFeature"></strong><span id="tourHint"></span></div>
+        <nav><button id="tourNextButton" type="button">จุดถัดไป →</button><button id="tourPauseButton" type="button" aria-pressed="false">หยุดชม</button><button id="tourExitButton" type="button">กลับเลือกสนาม</button></nav>
+      </section>
       <div id="toast" class="toast" aria-live="polite" hidden></div>
       <div id="impactOverlay" class="impact-overlay" aria-hidden="true" hidden>
         <div class="impact-card"><span id="impactIcon"></span><strong id="impactLabel"></strong></div>
@@ -125,6 +130,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=14-0"></script>
+    <script type="module" src="game.js?v=15-0"></script>
   </body>
 </html>

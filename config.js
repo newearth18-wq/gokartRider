@@ -1,27 +1,27 @@
 export const TRACKS = [
   {
-    id: 'meadow', name: 'สวนสายรุ้ง', subtitle: 'ทางโค้งกว้าง · ทุ่งหญ้า', icon: '🌈',
-    sky: 0x83d7ff, fog: 0xc0ecff, ground: 0x80cf80, verge: 0x51ae68,
+    id: 'meadow', name: 'สวนสายรุ้ง', subtitle: 'ซุ้มสายรุ้ง · กังหัน · ลูกตุ้ม', icon: '🌈',
+    sky: 0x72d1ff, fog: 0xb9efff, ground: 0x77d984, verge: 0x44bc78,
     road: 0x636d77, rail: 0x3188d1, foliage: 0x37a978, mountain: 0x91bec3,
     decor: 'garden',
     points: [[0,0,0],[65,1,32],[148,3,66],[236,1,55],[278,0,-20],[248,2,-95],[169,4,-132],[85,1,-105],[14,2,-144],[-68,3,-120],[-137,1,-54],[-141,0,27],[-80,2,81],[-23,1,69]],
   },
   {
-    id: 'canyon', name: 'หุบเขาทอง', subtitle: 'โค้งต่อเนื่อง · อุโมงค์หิน', icon: '🏜️',
+    id: 'canyon', name: 'หุบเขาทอง', subtitle: 'อุโมงค์ · หินกลิ้ง · พื้นทราย', icon: '🏜️',
     sky: 0xffc57a, fog: 0xffd6a1, ground: 0xd99a5c, verge: 0xb97849,
     road: 0x77665c, rail: 0xe0a344, foliage: 0x5c9c64, mountain: 0xbb7754,
     decor: 'canyon',
     points: [[0,0,0],[58,2,13],[115,5,54],[197,6,41],[236,7,-16],[211,9,-83],[143,7,-107],[112,8,-178],[30,6,-186],[-37,5,-146],[-111,4,-169],[-167,1,-94],[-130,1,-21],[-80,0,46],[-20,0,65]],
   },
   {
-    id: 'snow', name: 'ยอดเขาหิมะ', subtitle: 'ทางไต่ระดับ · ป่าสน', icon: '❄️',
+    id: 'snow', name: 'ยอดเขาหิมะ', subtitle: 'ปราสาทน้ำแข็ง · ลานลื่น · บอลหิมะ', icon: '❄️',
     sky: 0x9dcffa, fog: 0xdbedff, ground: 0xebf5fa, verge: 0xa8d2d7,
     road: 0x5d7082, rail: 0x2687c8, foliage: 0x2d8e8d, mountain: 0xb4cddd,
     decor: 'snow',
     points: [[0,1,0],[68,3,23],[128,6,80],[190,10,50],[226,14,-22],[181,16,-78],[121,13,-70],[83,11,-126],[25,10,-162],[-54,8,-149],[-116,6,-94],[-165,2,-31],[-131,0,48],[-62,0,65]],
   },
   {
-    id: 'harbor', name: 'เมืองริมอ่าว', subtitle: 'โค้งเมือง · แสงไฟ', icon: '🌊',
+    id: 'harbor', name: 'เมืองริมอ่าว', subtitle: 'ประภาคาร · เครน · กล่องเคลื่อนที่', icon: '🌊',
     sky: 0x7ec6f2, fog: 0xc3e5fa, ground: 0x94c9ad, verge: 0x58b5a9,
     road: 0x505f73, rail: 0x236eb6, foliage: 0x399f8d, mountain: 0x8caebc,
     decor: 'harbor',
