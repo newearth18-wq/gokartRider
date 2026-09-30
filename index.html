@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=11-0" />
+    <link rel="stylesheet" href="style.css?v=13-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
@@ -110,7 +110,7 @@
       </section>
 
       <section id="results" class="overlay" aria-labelledby="resultsTitle" hidden>
-        <div class="modal-card"><div class="eyebrow">FINISH LINE</div><h2 id="resultsTitle">เข้าเส้นชัย!</h2><div class="result-place" id="resultPlace">1st</div><p id="resultSummary"></p><button id="againButton" class="primary-button" type="button">แข่งอีกครั้ง <span>→</span></button></div>
+        <div class="modal-card results-card"><div class="eyebrow">FINISH LINE</div><h2 id="resultsTitle">เข้าเส้นชัย!</h2><div class="result-place" id="resultPlace">1st</div><p id="resultSummary"></p><h3 id="resultsBoardTitle">🏆 ตารางคะแนน</h3><div class="results-board-wrap" role="region" aria-label="ตารางผลการแข่งขัน" tabindex="0"><table class="results-board"><thead><tr><th scope="col">อันดับ</th><th scope="col">นักแข่ง</th><th scope="col">เวลา / สถานะ</th><th scope="col">ตอบถูก</th></tr></thead><tbody id="resultRows"></tbody></table></div><p id="resultsLiveNote" class="results-live-note"></p><button id="againButton" class="primary-button" type="button">แข่งอีกครั้ง <span>→</span></button></div>
       </section>
 
       <div id="countdown" class="countdown" aria-live="polite" hidden>3</div>
@@ -124,6 +124,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=12-0"></script>
+    <script type="module" src="game.js?v=13-0"></script>
   </body>
 </html>

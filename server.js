@@ -38,8 +38,9 @@ function broadcast(room, message) {
 }
 
 function publicPlayers(room) {
-  return [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt }) =>
-    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt }));
+  const active = [...room.players.values()].map(({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt, finishPlace, finishTime, quizCorrect, quizAttempted }) =>
+    ({ id, name, character, model, kart, helmet, rim, decal, distance, lateral, speed, boost, shield, held, hitKind, hitTime, hitId, bumpId, finishedAt, finishPlace, finishTime, quizCorrect, quizAttempted }));
+  return active.concat([...room.results.values()].filter(player => !room.players.has(player.id)));
 }
 
 function roomStatus(room) {
@@ -95,7 +96,7 @@ function join(client, message) {
     room = { code, track: VALID_TRACKS.has(message.track) ? message.track : 'meadow',
       mode: message.mode === 'item' ? 'item' : 'speed', state: 'lobby',
       learning: Boolean(message.learning), questions,
-      hostId: client.id, players: new Map(), startAt: 0, createdAt: Date.now() };
+      hostId: client.id, players: new Map(), results: new Map(), startAt: 0, createdAt: Date.now() };
     rooms.set(code, room);
   }
   client.name = cleanName(message.name);
@@ -117,6 +118,8 @@ function join(client, message) {
   client.lastBumpAt = 0;
   client.lastBumpWith = null;
   client.finishedAt = null;
+  client.finishPlace = client.finishTime = null;
+  client.quizCorrect = client.quizAttempted = 0;
   client.room = room;
   room.players.set(client.id, client);
   send(client, { ...roomStatus(room), type: 'welcome', id: client.id });
@@ -135,7 +138,8 @@ function handleMessage(client, message) {
     broadcast(room, roomStatus(room));
     return;
   }
-  if (message.type === 'state' && (room.state === 'racing' || room.state === 'countdown')) {
+  if (message.type === 'state' && !client.finishedAt &&
+      (room.state === 'racing' || room.state === 'countdown')) {
     const distance = Number(message.distance), lateral = Number(message.lateral), speed = Number(message.speed);
     if (![distance, lateral, speed].every(Number.isFinite)) return;
     const elapsed = Math.max(0, (Date.now() - room.startAt) / 1000);
@@ -207,8 +211,16 @@ function handleMessage(client, message) {
   }
   if (message.type === 'finish' && room.state === 'racing' && !client.finishedAt) {
     client.finishedAt = Date.now();
-    broadcast(room, { type: 'finish', id: client.id, place: [...room.players.values()]
-      .filter(player => player.finishedAt).length });
+    client.finishPlace = room.results.size + 1;
+    client.finishTime = Math.max(0, client.finishedAt - room.startAt);
+    client.quizAttempted = Number.isInteger(message.quizAttempted) ?
+      Math.max(0, Math.min(100, message.quizAttempted)) : 0;
+    client.quizCorrect = Number.isInteger(message.quizCorrect) ?
+      Math.max(0, Math.min(client.quizAttempted, message.quizCorrect)) : 0;
+    room.results.set(client.id, publicPlayers(room).find(player => player.id === client.id));
+    broadcast(room, { type: 'finish', id: client.id, place: client.finishPlace,
+      finishTime: client.finishTime, quizCorrect: client.quizCorrect,
+      quizAttempted: client.quizAttempted });
   }
 }
 

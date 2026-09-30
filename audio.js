@@ -6,6 +6,7 @@ export class GameAudio {
     this.musicGain = null;
     this.nextMusicTime = 0;
     this.musicStep = 0;
+    this.noiseBuffer = null;
     try { this.enabled = localStorage.getItem('turbo-trail-muted') !== 'true'; }
     catch { this.enabled = true; }
   }
@@ -28,6 +29,10 @@ export class GameAudio {
       this.musicGain = this.context.createGain();
       this.musicGain.gain.value = 0;
       this.musicGain.connect(this.context.destination);
+      this.noiseBuffer = this.context.createBuffer(1, Math.ceil(this.context.sampleRate * .45),
+        this.context.sampleRate);
+      const samples = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
     }
     if (this.context.state === 'suspended') this.context.resume().catch(() => {});
   }
@@ -88,6 +93,35 @@ export class GameAudio {
     }
   }
 
+  noiseBurst(at, duration, frequency, volume, filterType = 'lowpass') {
+    const source = this.context.createBufferSource();
+    source.buffer = this.noiseBuffer;
+    const filter = this.context.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(frequency, at);
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(.0001, at);
+    gain.gain.exponentialRampToValueAtTime(volume, at + .012);
+    gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    source.connect(filter).connect(gain).connect(this.context.destination);
+    source.start(at);
+    source.stop(at + duration + .01);
+  }
+
+  sweep(at, from, to, duration, type, volume) {
+    const tone = this.context.createOscillator();
+    const gain = this.context.createGain();
+    tone.type = type;
+    tone.frequency.setValueAtTime(from, at);
+    tone.frequency.exponentialRampToValueAtTime(to, at + duration);
+    gain.gain.setValueAtTime(.0001, at);
+    gain.gain.exponentialRampToValueAtTime(volume, at + .015);
+    gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    tone.connect(gain).connect(this.context.destination);
+    tone.start(at);
+    tone.stop(at + duration + .01);
+  }
+
   cue(kind) {
     if (!this.enabled || !this.context || this.context.state !== 'running') return;
     const now = this.context.currentTime;
@@ -104,6 +138,11 @@ export class GameAudio {
       stun: [[540, .06], [310, .09], [180, .20]],
       stall: [[620, .05], [280, .10], [115, .21]],
       blocked: [[750, .07], [980, .16]],
+      collision: [[260, .08], [130, .16]],
+      ballImpact: [[410, .06], [190, .13], [110, .19]],
+      pieImpact: [[680, .05], [360, .10], [220, .14]],
+      bananaImpact: [[850, .05], [580, .08], [350, .15]],
+      pulseImpact: [[900, .04], [470, .12], [160, .20]],
     }[kind];
     if (!notes) return;
     let at = now;
@@ -119,6 +158,24 @@ export class GameAudio {
       tone.start(at);
       tone.stop(at + duration + .01);
       at += duration * .82;
+    }
+    if (['collision', 'crash', 'ballImpact'].includes(kind)) {
+      this.noiseBurst(now, kind === 'collision' ? .24 : .18, 520, .14);
+      this.sweep(now, 190, 72, .23, 'sawtooth', .085);
+    } else if (kind === 'pieImpact') {
+      this.noiseBurst(now, .15, 1300, .09);
+      this.sweep(now, 650, 170, .18, 'triangle', .07);
+    } else if (kind === 'bananaImpact') {
+      this.noiseBurst(now, .28, 2200, .055, 'highpass');
+      this.sweep(now, 1050, 250, .30, 'sine', .07);
+    } else if (kind === 'pulseImpact' || kind === 'pulse') {
+      this.noiseBurst(now, .15, 3400, .06, 'highpass');
+      this.sweep(now, 1300, 95, .35, 'sawtooth', .055);
+    } else if (kind === 'ball' || kind === 'pie') {
+      this.sweep(now, kind === 'ball' ? 260 : 580, kind === 'ball' ? 820 : 210,
+        .25, 'triangle', .065);
+    } else if (kind === 'blocked' || kind === 'shield') {
+      this.sweep(now, 500, 1500, .20, 'sine', .055);
     }
   }
 }

@@ -5,7 +5,7 @@ import { resolveKartCollision } from './collision.mjs?v=12-0';
 import { RaceConnection } from './network.js';
 import { DEFAULT_QUESTIONS, MAX_QUESTIONS, normalizeQuestions } from './quiz.mjs';
 import { qrcode } from './vendor/qrcode.mjs';
-import { GameAudio } from './audio.js?v=11-0';
+import { GameAudio } from './audio.js?v=13-0';
 
 const canvas = document.querySelector('#track');
 const previewCanvas = document.querySelector('#garagePreview');
@@ -118,7 +118,10 @@ let projectiles = [];
 let impactBursts = [];
 let crashCooldowns = new Map();
 let lastServerBumpId = 0;
+let myFinishPlace = null;
+let myFinishTime = null;
 let lastLeaderboardUpdate = 0;
+let lastResultsUpdate = 0;
 let renderedRoomQr = '';
 let scannerStream = null;
 let scannerTimer = null;
@@ -1000,7 +1003,7 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
 
 function syncRemoteKarts(dt) {
   const active = new Set();
-  const visiblePlayers = connectedPlayers.filter(player => player.id !== network.id)
+  const visiblePlayers = connectedPlayers.filter(player => player.id !== network.id && !player.finishedAt)
     .sort((a, b) => Math.abs(a.distance - game.distance) - Math.abs(b.distance - game.distance))
     .slice(0, 18);
   for (const player of visiblePlayers) {
@@ -1026,7 +1029,10 @@ function syncRemoteKarts(dt) {
       kart.userData.remoteHitId = player.hitId;
       kart.userData.remoteHitKind = player.hitKind;
       kart.userData.remoteHitTime = player.hitTime;
-      if (player.hitKind) spawnImpactBurst(player.distance, player.lateral, player.hitKind);
+      if (player.hitKind) {
+        spawnImpactBurst(player.distance, player.lateral, player.hitKind);
+        if (Math.abs(player.distance - game.distance) < 140) audio.cue(impactCue(player.hitKind));
+      }
     } else if (player.hitId === kart.userData.remoteHitId) {
       kart.userData.remoteHitTime = Math.min(kart.userData.remoteHitTime || 0, player.hitTime || 0);
     }
@@ -1102,13 +1108,15 @@ function updateSmoke(dt) {
     particle.life -= dt;
     if (particle.life <= 0) {
       scene.remove(particle.puff);
+      particle.puff.geometry.dispose();
       particle.puff.material.dispose();
       smoke.splice(i, 1);
       continue;
     }
-    particle.puff.position.y += dt * 1.1;
-    particle.puff.scale.setScalar(1 + (1 - particle.life / .8) * 2.2);
-    particle.puff.material.opacity = particle.life / .8 * .4;
+    const duration = particle.duration || .8;
+    particle.puff.position.y += dt * (particle.rise ?? 1.1);
+    particle.puff.scale.setScalar(1 + (1 - particle.life / duration) * 2.2);
+    particle.puff.material.opacity = particle.life / duration * .4;
   }
 }
 
@@ -1313,7 +1321,11 @@ function renderLobby(data) {
 
 function onNetworkMessage(data) {
   if (data.type === 'welcome' || data.type === 'room') renderLobby(data);
-  if (data.type === 'snapshot') connectedPlayers = data.players || [];
+  if (data.type === 'snapshot') {
+    connectedPlayers = data.players || [];
+    if (game.mode === 'finished' && performance.now() - lastResultsUpdate > 350)
+      renderResultsBoard();
+  }
   if (data.type === 'collision' && onlineRace && game.mode === 'racing') {
     game.distance = data.distance;
     game.lateral = data.lateral;
@@ -1326,7 +1338,11 @@ function onNetworkMessage(data) {
     }
   }
   if (data.type === 'finish' && data.id === network.id && game.mode === 'finished') {
+    myFinishPlace = data.place;
+    myFinishTime = data.finishTime / 1000;
     ui.resultPlace.textContent = `${data.place}/${connectedPlayers.length}`;
+    updateResultSummary();
+    renderResultsBoard();
   }
   if (data.type === 'item' && game.mode === 'racing') handleWeaponEvent(data);
   if (data.type === 'error') setNetworkStatus(data.message, true);
@@ -1409,6 +1425,7 @@ function resetRace(online = false, startAt = 0) {
   impactBursts = [];
   crashCooldowns.clear();
   lastServerBumpId = 0;
+  myFinishPlace = myFinishTime = null;
   $('#impactOverlay').hidden = true;
   earnedPower = null; activeQuiz = null; nextQuizDistance = FIRST_QUIZ_DISTANCE;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
@@ -1419,6 +1436,7 @@ function resetRace(online = false, startAt = 0) {
   $('#leaderboardButton').setAttribute('aria-expanded', 'false');
   $('#learningScore').hidden = !learningEnabled;
   lastLeaderboardUpdate = 0;
+  lastResultsUpdate = 0;
   opponents.forEach(kart => { kart.visible = !online; });
   while (smoke.length) {
     const particle = smoke.pop();
@@ -1448,17 +1466,80 @@ function pauseRace() {
 function finishRace() {
   game.mode = 'finished';
   audio.cue('finish');
-  if (onlineRace) network.send({ type: 'finish' });
-  const place = rank();
+  if (onlineRace) network.send({ type: 'finish', quizCorrect, quizAttempted });
+  const place = onlineRace ? rank() : 1 + game.ai.filter(ai => ai.finishedAt != null).length;
+  myFinishPlace = place;
+  myFinishTime = game.raceTime;
   const suffix = place === 1 ? 'st' : place === 2 ? 'nd' : place === 3 ? 'rd' : 'th';
   ui.resultPlace.textContent = String(place) + suffix;
-  ui.resultSummary.textContent = 'เวลา ' + formatTime(game.raceTime) + ' · ' +
-    (place === 1 ? 'สุดยอด! คุณเป็นแชมป์สนามนี้' : 'ลองใหม่แล้วแซงให้ได้!') +
-    (learningEnabled ? ` · ตอบถูก ${quizCorrect}/${quizAttempted} ข้อ` : '');
+  updateResultSummary();
+  renderResultsBoard();
   ui.results.hidden = false;
   ui.touch.hidden = true;
   ui.pause.hidden = true;
   $('#againButton').firstChild.textContent = onlineRace ? 'กลับเมนู ' : 'แข่งอีกครั้ง ';
+}
+
+function updateResultSummary() {
+  const place = myFinishPlace || 1;
+  ui.resultSummary.textContent = 'เวลา ' + formatTime(myFinishTime ?? game.raceTime) + ' · ' +
+    (place === 1 ? 'สุดยอด! คุณเป็นแชมป์สนามนี้' : 'ลองใหม่แล้วแซงให้ได้!') +
+    (learningEnabled ? ` · ตอบถูก ${quizCorrect}/${quizAttempted} ข้อ` : '');
+}
+
+function renderResultsBoard() {
+  lastResultsUpdate = performance.now();
+  const totalDistance = trackLength * RACE_LAPS;
+  const myId = onlineRace ? network.id : 'me';
+  const racers = onlineRace ? connectedPlayers.map(player => ({
+    id: player.id, name: player.name, icon: CHARACTERS.find(c => c.id === player.character)?.face || '🏎️',
+    distance: player.id === network.id ? game.distance : player.distance,
+    finishTime: player.id === network.id && game.mode === 'finished' ?
+      (player.finishTime ?? (myFinishTime ?? game.raceTime) * 1000) : player.finishTime,
+    finishPlace: player.id === network.id && game.mode === 'finished' ?
+      (player.finishPlace ?? myFinishPlace) : player.finishPlace,
+    quizCorrect: player.id === network.id ? quizCorrect : player.quizCorrect,
+    quizAttempted: player.id === network.id ? quizAttempted : player.quizAttempted,
+  })) : [
+    { id: 'me', name: selectedCharacter.name, icon: selectedCharacter.face,
+      distance: game.distance, finishTime: (myFinishTime ?? game.raceTime) * 1000,
+      quizCorrect, quizAttempted },
+    ...game.ai.map((ai, i) => ({ id: `ai-${i}`, name: CHARACTERS[(i + 1) % CHARACTERS.length].name,
+      icon: CHARACTERS[(i + 1) % CHARACTERS.length].face, distance: ai.distance,
+      finishTime: ai.finishedAt == null ? null : ai.finishedAt * 1000,
+      quizCorrect: null, quizAttempted: null })),
+  ];
+  racers.sort((a, b) => {
+    const aFinished = a.finishTime != null, bFinished = b.finishTime != null;
+    if (aFinished !== bFinished) return aFinished ? -1 : 1;
+    if (aFinished) return (a.finishPlace ?? Infinity) - (b.finishPlace ?? Infinity) ||
+      a.finishTime - b.finishTime;
+    return b.distance - a.distance;
+  });
+  const rows = racers.map((racer, index) => {
+    const tr = document.createElement('tr');
+    tr.className = `${racer.id === myId ? 'mine ' : ''}${racer.finishTime != null ? 'finished' : ''}`;
+    const place = document.createElement('td');
+    place.textContent = index < 3 ? ['🥇', '🥈', '🥉'][index] : String(index + 1);
+    const name = document.createElement('td');
+    const label = document.createElement('span');
+    label.className = 'racer-name';
+    label.textContent = `${racer.icon} ${racer.name}${racer.id === myId ? ' (คุณ)' : ''}`;
+    name.append(label);
+    const time = document.createElement('td');
+    time.textContent = racer.finishTime != null ? formatTime(racer.finishTime / 1000) :
+      `รอบ ${Math.max(1, Math.min(RACE_LAPS, Math.floor(racer.distance / trackLength) + 1))}/${RACE_LAPS}`;
+    const score = document.createElement('td');
+    score.textContent = learningEnabled && racer.quizAttempted != null ?
+      `${racer.quizCorrect || 0}/${racer.quizAttempted || 0}` : '—';
+    tr.append(place, name, time, score);
+    return tr;
+  });
+  $('#resultRows').replaceChildren(...rows);
+  const finished = racers.filter(racer => racer.finishTime != null).length;
+  $('#resultsLiveNote').textContent = onlineRace ?
+    `เข้าเส้นชัยแล้ว ${finished}/${racers.length} คน · ตารางอัปเดตเมื่อเพื่อนแข่งจบ` :
+    `ผลการแข่งขันเมื่อคุณเข้าเส้นชัย · นักแข่งทั้งหมด ${racers.length} คน`;
 }
 
 function returnToMenu() {
@@ -1654,33 +1735,42 @@ function removeWeapon(effect) {
 
 function spawnImpactBurst(distance, lateral, kind) {
   const color = { banana: 0xffe331, ball: 0xff6878, pie: 0xfff2dd, pulse: 0x52e7ff,
-    crash: 0xffad32 }[kind] || 0xffffff;
+    crash: 0xffad32, shield: 0x7fffe6 }[kind] || 0xffffff;
   const group = new THREE.Group();
   group.position.copy(weaponPosition(distance, lateral, 1.5));
   const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .85, depthWrite: false });
   const ring = mesh(new THREE.TorusGeometry(1.3, .13, 6, 24), material, group);
   ring.rotation.x = Math.PI / 2;
-  for (let i = 0; i < 9; i++) {
-    const angle = i * Math.PI * 2 / 9;
-    mesh(new THREE.SphereGeometry(.19, 6, 5), material, group,
-      Math.cos(angle) * 1.2, Math.sin(angle) * 1.2, 0);
-    if (kind === 'crash') {
-      const spark = mesh(new THREE.ConeGeometry(.17, .68, 4), material, group,
-        Math.cos(angle) * 1.75, Math.sin(angle) * 1.75, 0);
-      spark.rotation.z = angle - Math.PI / 2;
-    }
+  const count = kind === 'crash' ? 12 : 9;
+  for (let i = 0; i < count; i++) {
+    const angle = i * Math.PI * 2 / count;
+    const radius = kind === 'pie' ? 1.25 + (i % 3) * .18 : 1.5;
+    const spark = mesh(kind === 'pie' ? new THREE.SphereGeometry(.30 + (i % 2) * .12, 8, 6) :
+      new THREE.ConeGeometry(kind === 'crash' ? .22 : .15, kind === 'crash' ? 1.0 : .58, 5),
+    material, group, Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+    if (kind === 'pie') spark.scale.z = .23;
+    else spark.rotation.z = angle - Math.PI / 2;
+  }
+  if (kind === 'pulse' || kind === 'shield' || kind === 'ball') {
+    const second = mesh(new THREE.TorusGeometry(kind === 'pulse' ? 2.2 : 1.8, .08, 6, 30),
+      material, group);
+    second.rotation.y = Math.PI / 3;
+  }
+  if (kind === 'crash' || kind === 'ball') {
+    mesh(new THREE.OctahedronGeometry(kind === 'crash' ? .75 : .5), material, group);
   }
   scene.add(group);
-  impactBursts.push({ group, age: 0, material });
+  impactBursts.push({ group, age: 0, material, duration: kind === 'crash' ? .9 : .72 });
 }
 
 function updateImpactBursts(dt) {
   for (let i = impactBursts.length - 1; i >= 0; i--) {
     const burst = impactBursts[i];
     burst.age += dt;
-    burst.group.scale.setScalar(1 + burst.age * 2.6);
-    burst.material.opacity = Math.max(0, .85 * (1 - burst.age / .7));
-    if (burst.age > .7) {
+    burst.group.scale.setScalar(1 + burst.age * 2.2);
+    burst.group.rotation.z += dt * 1.6;
+    burst.material.opacity = Math.max(0, .85 * (1 - burst.age / burst.duration));
+    if (burst.age > burst.duration) {
       burst.group.traverse(object => object.geometry?.dispose());
       burst.material.dispose();
       scene.remove(burst.group);
@@ -1691,12 +1781,17 @@ function updateImpactBursts(dt) {
 
 function updateImpactOverlay() {
   const overlay = $('#impactOverlay');
-  overlay.hidden = game.mode !== 'racing' || hitTime <= 0;
+  overlay.hidden = game.mode !== 'racing' || hitTime <= 0 && game.crashShake <= 0;
   if (overlay.hidden) return;
-  overlay.className = `impact-overlay ${hitKind}`;
-  $('#impactIcon').textContent = HIT_LABELS[hitKind][0];
-  $('#impactLabel').textContent = HIT_LABELS[hitKind][1];
-  overlay.style.opacity = String(Math.min(1, hitTime * 2));
+  const kind = hitTime > 0 ? hitKind : 'crash';
+  overlay.className = `impact-overlay ${kind}`;
+  $('#impactIcon').textContent = kind === 'crash' ? '💥' : HIT_LABELS[kind][0];
+  $('#impactLabel').textContent = kind === 'crash' ? 'ชน! รถเสียจังหวะ' : HIT_LABELS[kind][1];
+  overlay.style.opacity = String(Math.min(1, kind === 'crash' ? game.crashShake * 2.5 : hitTime * 2));
+}
+
+function impactCue(kind) {
+  return { banana: 'bananaImpact', ball: 'ballImpact', pie: 'pieImpact', pulse: 'pulseImpact' }[kind];
 }
 
 function applyAiHit(ai, kind) {
@@ -1704,6 +1799,7 @@ function applyAiHit(ai, kind) {
   ai.hitTime = HIT_DURATIONS[kind];
   ai.slowTime = ai.hitTime;
   spawnImpactBurst(ai.distance, ai.lateral, kind);
+  if (Math.abs(ai.distance - game.distance) < 150) audio.cue(impactCue(kind));
 }
 
 function kartCrash(id, rival, result) {
@@ -1714,14 +1810,15 @@ function kartCrash(id, rival, result) {
   playerKart.userData.crashTime = .55;
   if (rival.kart) rival.kart.userData.crashTime = .55;
   game.crashShake = .42;
-  audio.cue('crash');
+  audio.cue('collision');
   toast(result.axis === 'side' ? 'เฉี่ยวชน! รถสะบัด ⚡' : 'ชนรถคันหน้า! 💥', 1.1);
 }
 
 function resolveRaceCollisions(previous) {
   const rivals = onlineRace ? connectedPlayers.filter(player => player.id !== network.id && !player.finishedAt)
     .map(player => ({ ...player, kart: remoteKarts.get(player.id) })) :
-    game.ai.map((ai, i) => ({ ...ai, id: `ai-${i}`, kart: opponents[i] }));
+    game.ai.flatMap((ai, i) => ai.finishedAt == null ?
+      [{ ...ai, id: `ai-${i}`, kart: opponents[i] }] : []);
   for (const rival of rivals) {
     const result = resolveKartCollision(previous, game, rival, ROAD_HALF);
     if (!result) continue;
@@ -1739,8 +1836,10 @@ function resolveRaceCollisions(previous) {
 function resolveAiCollisions(previous) {
   for (let i = 0; i < game.ai.length; i++) {
     const ai = game.ai[i];
+    if (ai.finishedAt != null) continue;
     for (let j = 0; j < i; j++) {
       const other = game.ai[j];
+      if (other.finishedAt != null) continue;
       const result = resolveKartCollision(previous[i], ai, other, ROAD_HALF);
       if (!result) continue;
       ai.distance = result.distance;
@@ -1758,6 +1857,7 @@ function resolveAiCollisions(previous) {
 function weaponHit(kind) {
   if (shieldTime > 0) {
     toast('เกราะป้องกันรับการโจมตี! 🛡️');
+    spawnImpactBurst(game.distance, game.lateral, 'shield');
     audio.cue('blocked');
     return;
   }
@@ -1767,15 +1867,18 @@ function weaponHit(kind) {
   game.boostTime = 0;
   game.speed *= kind === 'ball' ? .24 : kind === 'pie' ? .12 : kind === 'pulse' ? .18 : .58;
   spawnImpactBurst(game.distance, game.lateral, kind);
-  audio.cue(kind === 'ball' ? 'crash' : kind === 'banana' ? 'skid' : kind === 'pie' ? 'stun' : 'stall');
+  audio.cue(impactCue(kind));
   updateImpactOverlay();
 }
 
 function handleWeaponEvent(event) {
+  if (event.id !== network.id && Math.abs((event.fromDistance ?? event.distance ?? game.distance) -
+      game.distance) < 140) audio.cue(event.item);
   if (event.item === 'pulse') {
     const attackerKart = remoteKarts.get(event.id);
     if (attackerKart) attackerKart.userData.waveTime = 1;
     const attacker = connectedPlayers.find(player => player.id === event.id);
+    if (attacker) spawnImpactBurst(attacker.distance, attacker.lateral, 'pulse');
     if (event.id !== network.id && attacker && attacker.distance < game.distance &&
         game.distance - attacker.distance < 120) weaponHit('pulse');
   } else if (event.item === 'banana' && Number.isFinite(event.distance) && Number.isFinite(event.lateral)) {
@@ -1786,10 +1889,20 @@ function handleWeaponEvent(event) {
   } else if ((event.item === 'ball' || event.item === 'pie') && Number.isFinite(event.fromDistance)) {
     const shot = { kind: event.item, targetId: event.targetId, fromDistance: event.fromDistance,
       fromLateral: event.fromLateral, toDistance: event.toDistance, toLateral: event.toLateral,
-      age: 0, duration: .85, mesh: weaponMesh(event.item) };
+      age: 0, trailTimer: 0, duration: .85, mesh: weaponMesh(event.item) };
     projectiles.push(shot);
+    spawnImpactBurst(event.fromDistance, event.fromLateral, event.item);
     if (event.id === network.id) toast(event.item === 'ball' ? 'ยิงลูกบอลเด้ง! 🏐' : 'ปาพายครีม! 🥧');
   }
+}
+
+function spawnWeaponTrail(position, kind) {
+  const color = kind === 'ball' ? 0xff719e : 0xfff9dc;
+  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .66,
+    depthWrite: false });
+  const puff = mesh(new THREE.SphereGeometry(kind === 'ball' ? .32 : .42, 8, 6), material, scene);
+  puff.position.copy(position);
+  smoke.push({ puff, life: .38, duration: .38, rise: .2 });
 }
 
 function updateWeapons(dt) {
@@ -1797,6 +1910,7 @@ function updateWeapons(dt) {
     const trap = bananaTraps[i];
     trap.age += dt;
     trap.mesh.rotation.y += dt * .8;
+    trap.mesh.position.y += Math.sin(trap.age * 8) * dt * .4;
     if (game.mode === 'racing' && trap.ownerId !== (onlineRace ? network.id : 'me') &&
         Math.abs(game.distance - trap.distance) < 2.5 && Math.abs(game.lateral - trap.lateral) < 2.1) {
       weaponHit('banana');
@@ -1823,9 +1937,15 @@ function updateWeapons(dt) {
       lerp(shot.fromLateral, endLateral, t), 2 + Math.sin(t * Math.PI) * 5));
     shot.mesh.rotation.x += dt * 10;
     shot.mesh.rotation.z += dt * 6;
+    shot.trailTimer += dt;
+    if (shot.trailTimer >= .065 && t < 1) {
+      shot.trailTimer = 0;
+      spawnWeaponTrail(shot.mesh.position, shot.kind);
+    }
     if (t >= 1) {
       if (shot.targetId === (onlineRace ? network.id : 'me') && game.mode === 'racing') weaponHit(shot.kind);
       else if (!onlineRace && target) applyAiHit(target, shot.kind);
+      else spawnImpactBurst(endDistance, endLateral, shot.kind);
       removeWeapon(shot); projectiles.splice(i, 1);
     }
   }
@@ -1837,10 +1957,15 @@ function useBoost() {
     if (earnedPower) earnedPower = null;
     else heldItem = null;
     if (item === 'nitro') { game.boostTime = 3.5 * selectedKart.boost; toast('ไนโตรแรงเต็มพิกัด! 🔥'); }
-    else if (item === 'shield') { shieldTime = 7; toast('โล่ป้องกันพร้อม! 🛡️'); }
+    else if (item === 'shield') {
+      shieldTime = 7;
+      spawnImpactBurst(game.distance, game.lateral, 'shield');
+      toast('โล่ป้องกันพร้อม! 🛡️');
+    }
     else if (item === 'pulse') {
       pulseTime = 0;
       playerKart.userData.waveTime = 1;
+      spawnImpactBurst(game.distance, game.lateral, 'pulse');
       if (!onlineRace) game.ai.forEach(ai => {
         if (ai.distance > game.distance && ai.distance - game.distance < 120) applyAiHit(ai, 'pulse');
       });
@@ -1942,6 +2067,7 @@ function update(dt) {
     const aiPrevious = onlineRace ? [] : game.ai.map(ai =>
       ({ distance: ai.distance, lateral: ai.lateral }));
     for (const opponent of onlineRace ? [] : game.ai) {
+      if (opponent.finishedAt != null) continue;
       opponent.slowTime = Math.max(0, (opponent.slowTime || 0) - dt);
       opponent.hitTime = Math.max(0, (opponent.hitTime || 0) - dt);
       const hitFactor = opponent.hitTime > 0 ?
@@ -1950,6 +2076,10 @@ function update(dt) {
         (1 + Math.sin(game.raceTime * .32 + opponent.phase) * .045);
       opponent.lateral += (Math.sin(game.raceTime * .5 + opponent.phase) * 3.2 -
         opponent.lateral) * dt * .26;
+      if (opponent.distance >= trackLength * RACE_LAPS) {
+        opponent.distance = trackLength * RACE_LAPS;
+        opponent.finishedAt = game.raceTime;
+      }
     }
     if (!onlineRace) resolveAiCollisions(aiPrevious);
     resolveRaceCollisions(previousPosition);

@@ -220,3 +220,50 @@ test('server keeps an overtaking kart behind a rival in the same lane', { timeou
     child.kill();
   }
 });
+
+test('finish snapshots keep race order, times, and bounded quiz scores', { timeout: 12000 }, async () => {
+  const port = await availablePort();
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' }, stdio: 'ignore',
+  });
+  const clients = [];
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/health`); break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 40)); }
+    }
+    const url = `ws://127.0.0.1:${port}/race`;
+    const host = await open(url), rider = await open(url);
+    clients.push(host, rider);
+    const hostWelcome = waitMessage(host, data => data.type === 'welcome');
+    host.send(JSON.stringify({ type: 'create', name: 'Teacher' }));
+    const room = await hostWelcome;
+    const riderWelcome = waitMessage(rider, data => data.type === 'welcome');
+    rider.send(JSON.stringify({ type: 'join', code: room.code, name: 'Student' }));
+    const student = await riderWelcome;
+    const racing = waitMessage(host, data => data.type === 'snapshot', 7000);
+    host.send(JSON.stringify({ type: 'start' }));
+    await racing;
+    const first = waitMessage(rider, data => data.type === 'finish' && data.id === room.id);
+    host.send(JSON.stringify({ type: 'finish', quizCorrect: 2, quizAttempted: 3 }));
+    const winner = await first;
+    assert.equal(winner.place, 1);
+    assert.ok(winner.finishTime >= 0);
+    const second = waitMessage(host, data => data.type === 'finish' && data.id === student.id);
+    rider.send(JSON.stringify({ type: 'finish', quizCorrect: 99, quizAttempted: 3 }));
+    assert.equal((await second).place, 2);
+    const board = waitMessage(host, data => data.type === 'snapshot' &&
+      data.players.every(player => player.finishPlace != null));
+    const racers = (await board).players;
+    assert.equal(racers.find(player => player.id === room.id).quizCorrect, 2);
+    assert.equal(racers.find(player => player.id === student.id).quizCorrect, 3);
+    assert.ok(racers.find(player => player.id === student.id).finishTime >= winner.finishTime);
+    const preserved = waitMessage(rider, data => data.type === 'snapshot' &&
+      data.players.some(player => player.id === room.id && player.finishPlace === 1));
+    host.close();
+    assert.equal((await preserved).players.find(player => player.id === room.id).quizCorrect, 2);
+  } finally {
+    for (const client of clients) client.close();
+    child.kill();
+  }
+});
