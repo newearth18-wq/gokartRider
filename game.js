@@ -59,8 +59,13 @@ let previewScene;
 let previewCamera;
 let previewKart;
 let opponents = [];
+let itemPickups = [];
 let smoke = [];
 let lastSmoke = 0;
+let driftSparkTick = 0;
+let boostTrailTime = 0;
+let shadowTexture;
+let particleTexture;
 let toastUntil = 0;
 let previousCountdown = '';
 let selectedTrack = TRACKS[0];
@@ -147,6 +152,45 @@ function freshGame() {
 
 function makeMaterial(color, roughness = .75, metalness = 0) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+function kartPaint(color, lite, roughness = .24) {
+  return lite ? makeMaterial(color, roughness, .12) : new THREE.MeshPhysicalMaterial({
+    color, roughness, metalness: .16, clearcoat: .9, clearcoatRoughness: .14,
+  });
+}
+
+function kartShadow() {
+  if (!shadowTexture) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const context = canvas.getContext('2d');
+    const gradient = context.createRadialGradient(32, 32, 5, 32, 32, 32);
+    gradient.addColorStop(0, '#08263aaa');
+    gradient.addColorStop(.55, '#0a254777');
+    gradient.addColorStop(1, '#0a254700');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+    shadowTexture = new THREE.CanvasTexture(canvas);
+  }
+  return shadowTexture;
+}
+
+function softParticleTexture() {
+  if (!particleTexture) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const context = canvas.getContext('2d');
+    const gradient = context.createRadialGradient(32, 32, 1, 32, 32, 31);
+    gradient.addColorStop(0, '#ffffff');
+    gradient.addColorStop(.28, '#ffffffdd');
+    gradient.addColorStop(.66, '#ffffff44');
+    gradient.addColorStop(1, '#ffffff00');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+    particleTexture = new THREE.CanvasTexture(canvas);
+  }
+  return particleTexture;
 }
 
 function mesh(geometry, material, parent, x = 0, y = 0, z = 0) {
@@ -526,18 +570,30 @@ function createScenery() {
 }
 
 function createItemPickups() {
-  const gold = makeMaterial(0xffd942, .25, .15);
-  const blue = new THREE.MeshBasicMaterial({ color: 0x60f1ff, transparent: true, opacity: .55 });
+  const gold = kartPaint(0xffd942, false, .19);
+  const blue = new THREE.MeshBasicMaterial({ color: 0x60f1ff, transparent: true,
+    opacity: .72, depthWrite: false, blending: THREE.AdditiveBlending });
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x3bc8f9, roughness: .15,
+    metalness: .1, transparent: true, opacity: .42, depthWrite: false,
+    emissive: 0x127acc, emissiveIntensity: .45 });
   for (let distance = 170; distance < trackLength; distance += 170) {
     const at = pose(distance);
     const pickup = new THREE.Group();
     pickup.position.copy(at.point);
     pickup.position.y += 2.2;
-    const diamond = mesh(new THREE.OctahedronGeometry(1.22, 0), gold, pickup);
+    pickup.userData.baseY = pickup.position.y;
+    pickup.userData.phase = distance * .023;
+    mesh(new THREE.BoxGeometry(1.9, 1.9, 1.9), glass, pickup).rotation.y = Math.PI / 4;
+    const diamond = mesh(new THREE.OctahedronGeometry(.82, 0), gold, pickup);
     diamond.rotation.y = distance / 100;
-    const halo = mesh(new THREE.TorusGeometry(1.5, .11, 8, 24), blue, pickup);
+    const halo = mesh(new THREE.TorusGeometry(1.47, .10, 8, 24), blue, pickup);
     halo.rotation.x = Math.PI / 2;
+    mesh(new THREE.TorusGeometry(1.22, .07, 6, 24), blue, pickup).rotation.y = Math.PI / 2;
+    for (const side of [-1, 1]) {
+      mesh(new THREE.OctahedronGeometry(.15), gold, pickup, side * 1.4, .72, 0);
+    }
     scene.add(pickup);
+    itemPickups.push(pickup);
   }
 }
 
@@ -545,20 +601,26 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   const group = new THREE.Group();
   const chassis = new THREE.Group();
   group.add(chassis);
-  const body = makeMaterial(color, .24, .17);
-  const bodyLight = makeMaterial(new THREE.Color(color).lerp(new THREE.Color(0xffffff), .34), .25, .14);
+  const body = kartPaint(color, lite);
+  const bodyLight = kartPaint(new THREE.Color(color).lerp(new THREE.Color(0xffffff), .34), lite, .20);
   const dark = makeMaterial(0x172438, .55);
   const rubber = makeMaterial(0x172032, .92);
   const rim = makeMaterial(look.rim ?? 0xe3edf6, .25, .55);
   const skin = makeMaterial(0xffd5b3, .75);
-  const helmet = makeMaterial(look.helmet ?? character.helmet, .24, .06);
+  const helmet = kartPaint(look.helmet ?? character.helmet, lite, .23);
   const suit = makeMaterial(character.suit, .5);
   const accent = makeMaterial(character.accent, .28);
   const highlight = makeMaterial(0xffdf45, .22, .08);
   const white = makeMaterial(0xffffff, .18);
   const eye = makeMaterial(0x14233b, .13);
   const model = KARTS.find(kart => kart.id === look.model) || KARTS[0];
-  const trim = makeMaterial(model.trim, .28, .14);
+  const trim = kartPaint(model.trim, lite, .27);
+
+  const shadow = mesh(new THREE.PlaneGeometry(7.4, 8.8),
+    new THREE.MeshBasicMaterial({ map: kartShadow(), transparent: true,
+      opacity: lite ? .43 : .60, depthWrite: false, polygonOffset: true,
+      polygonOffsetFactor: -1 }), group, 0, -.105, 0);
+  shadow.rotation.x = -Math.PI / 2;
 
   box(chassis, 2.6, .28, 3.7, dark, 0, .64, 0);
   const shell = mesh(new THREE.SphereGeometry(1, lite ? 12 : 24, lite ? 8 : 14), body, chassis, 0, .98, .1);
@@ -732,6 +794,9 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   }
   const head = new THREE.Group();
   driver.add(head);
+  const headScale = model.style === 'bubble' ? 1.06 : lite ? 1.11 : 1.19;
+  head.scale.set(headScale, headScale, 1.08);
+  head.position.y = -2.55 * (headScale - 1);
   const helmetShell = mesh(new THREE.SphereGeometry(.79, lite ? 12 : 28, lite ? 10 : 20), helmet, head, 0, 2.55, -.67);
   helmetShell.scale.set(1.06, .94, 1.01);
   const helmetBand = mesh(new THREE.SphereGeometry(1, 16, 12), accent, head, 0, 2.91, -.66);
@@ -745,6 +810,12 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
   for (const x of [-.25, .25]) {
     const e = mesh(new THREE.SphereGeometry(.12, 12, 10), eye, head, x, 2.54, .075);
     e.scale.set(.83, 1.5, .52);
+    if (!lite) {
+      const brow = mesh(new THREE.SphereGeometry(.16, 10, 8), eye, head,
+        x, 2.75, .19);
+      brow.scale.set(1.22, .24, .28);
+      brow.rotation.z = x < 0 ? -.14 : .14;
+    }
     if (!lite) {
       mesh(new THREE.SphereGeometry(.035, 8, 6), white, head, x - .03, 2.59, .14);
       const cheek = mesh(new THREE.SphereGeometry(.10, 10, 8), makeMaterial(0xf69caa, .7), head, x * 1.9, 2.3, .06);
@@ -857,7 +928,7 @@ function createKart(color, character = selectedCharacter, lite = false, look = a
       depthWrite: false }), chassis, 0, .65, 0);
   pulseRing.rotation.x = Math.PI / 2;
   pulseRing.visible = false;
-  group.userData = { chassis, driver, head, arms, wheels, flames, shieldBubble, pulseRing, weaponMeshes,
+  group.userData = { chassis, shadow, driver, head, arms, wheels, flames, shieldBubble, pulseRing, weaponMeshes,
     modelStyle: model.style, baseRotationX: 0, baseRotationY: 0, baseRotationZ: 0,
     waveTime: 0, lastDistance: 0, animationTime: 0 };
   scene.add(group);
@@ -870,7 +941,7 @@ function setup3D() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = .96;
   camera = new THREE.PerspectiveCamera(66, window.innerWidth / window.innerHeight, .15, 640);
   previewRenderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: true, powerPreference: 'low-power' });
   previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
@@ -907,14 +978,15 @@ function buildWorld() {
   }
   scene = new THREE.Scene();
   scene.background = new THREE.Color(selectedTrack.sky);
-  scene.fog = new THREE.FogExp2(selectedTrack.fog, .0023);
-  scene.add(new THREE.HemisphereLight(0xe5faff, 0x6c9b61, 1.6));
-  const sunlight = new THREE.DirectionalLight(0xffefc8, 1.8);
+  scene.fog = new THREE.FogExp2(selectedTrack.fog, .0019);
+  scene.add(new THREE.HemisphereLight(0xe5faff, 0x6c9b61, 1.28));
+  const sunlight = new THREE.DirectionalLight(0xffefc8, 2.0);
   sunlight.position.set(-90, 150, -40);
   scene.add(sunlight);
   createCurve();
   createRoad();
   createScenery();
+  itemPickups = [];
   if (selectedMode === 'item') createItemPickups();
   playerKart = createKart(appearance.paint, selectedCharacter, false, { ...appearance, model: selectedKart.id });
   previewKart = playerKart.clone(true);
@@ -998,6 +1070,7 @@ function syncKart(kart, distance, lateral, lean = 0, boost = false, heading = 0,
     parts.pulseRing.scale.setScalar(1 + Math.sin(parts.animationTime * 24) * .18);
     parts.pulseRing.material.opacity = .5 + Math.sin(parts.animationTime * 30) * .3;
   }
+  parts.shadow.position.y = at.point.y + .045 - kart.position.y;
   return at;
 }
 
@@ -1090,15 +1163,41 @@ function updateCamera(at, dt) {
 }
 
 function spawnSmoke(at) {
-  const material = new THREE.MeshBasicMaterial({
-    color: 0xeef8ff, transparent: true, opacity: .55, depthWrite: false,
-  });
+  const color = game.driftCharge > 65 ? 0x9b80ff : game.driftCharge > 30 ? 0x70ecff : 0xf2fbff;
   for (const side of [-1, 1]) {
-    const puff = mesh(new THREE.SphereGeometry(.48, 7, 6), material.clone(), scene);
-    puff.position.copy(at.point).addScaledVector(at.right, game.lateral + side * 1.5)
+    const point = at.point.clone().addScaledVector(at.right, game.lateral + side * 1.5)
       .addScaledVector(at.tangent, -1.4);
-    puff.position.y += .45;
-    smoke.push({ puff, life: .8 });
+    point.y += .35;
+    spawnVisualParticle(point, color, .8, .48, .52, 1.1);
+    if (++driftSparkTick % 3 === 0) {
+      const spark = point.clone().addScaledVector(at.right, side * .22);
+      spark.y += .12;
+      spawnVisualParticle(spark, game.driftCharge > 65 ? 0xffd95c : 0x74eaff,
+        .35, .16, .95, .45, at.tangent.clone().multiplyScalar(-4)
+          .addScaledVector(at.right, side * 2).add(new THREE.Vector3(0, 2.4, 0)), true);
+    }
+  }
+}
+
+function spawnVisualParticle(position, color, duration, size, opacity, rise, velocity = null, glow = false) {
+  const material = new THREE.SpriteMaterial({ map: softParticleTexture(), color,
+    transparent: true, opacity,
+    depthWrite: false, blending: glow ? THREE.AdditiveBlending : THREE.NormalBlending });
+  const puff = new THREE.Sprite(material);
+  puff.position.copy(position);
+  puff.scale.set(size * 2, size * 2, 1);
+  scene.add(puff);
+  smoke.push({ puff, life: duration, duration, rise, opacity, velocity,
+    baseSize: size, growth: glow ? .7 : 1.35 });
+}
+
+function spawnBoostTrail(at) {
+  for (const side of [-1, 1]) {
+    const position = at.point.clone().addScaledVector(at.right, game.lateral + side * .82)
+      .addScaledVector(at.tangent, -2.7);
+    position.y += .74;
+    spawnVisualParticle(position, side > 0 ? 0x55eaff : 0xffffff, .40, .31, .82, .2,
+      at.tangent.clone().multiplyScalar(-11).addScaledVector(at.right, side * 1.3), true);
   }
 }
 
@@ -1108,15 +1207,20 @@ function updateSmoke(dt) {
     particle.life -= dt;
     if (particle.life <= 0) {
       scene.remove(particle.puff);
-      particle.puff.geometry.dispose();
+      particle.puff.geometry?.dispose();
       particle.puff.material.dispose();
       smoke.splice(i, 1);
       continue;
     }
     const duration = particle.duration || .8;
+    if (particle.velocity) particle.puff.position.addScaledVector(particle.velocity, dt);
     particle.puff.position.y += dt * (particle.rise ?? 1.1);
-    particle.puff.scale.setScalar(1 + (1 - particle.life / duration) * 2.2);
-    particle.puff.material.opacity = particle.life / duration * .4;
+    const progress = 1 - particle.life / duration;
+    if (particle.baseSize) {
+      const size = particle.baseSize * 2 * (1 + progress * particle.growth);
+      particle.puff.scale.set(size, size, 1);
+    } else particle.puff.scale.setScalar(1 + progress * 2.2);
+    particle.puff.material.opacity = particle.life / duration * (particle.opacity ?? .4);
   }
 }
 
@@ -1419,13 +1523,19 @@ function resetRace(online = false, startAt = 0) {
   resetTouchSteering();
   lastItem = 0; heldItem = null; shieldTime = 0; pulseTime = 0;
   hitTime = 0; hitKind = null; hitId = 0;
-  for (const effect of [...bananaTraps, ...projectiles]) scene.remove(effect.mesh);
+  for (const effect of [...bananaTraps, ...projectiles]) removeWeapon(effect);
   bananaTraps = []; projectiles = [];
-  for (const burst of impactBursts) scene.remove(burst.group);
+  for (const burst of impactBursts) {
+    scene.remove(burst.group);
+    burst.group.traverse(object => object.geometry?.dispose());
+    burst.materials.forEach(material => material.dispose());
+  }
   impactBursts = [];
   crashCooldowns.clear();
   lastServerBumpId = 0;
   myFinishPlace = myFinishTime = null;
+  driftSparkTick = boostTrailTime = 0;
+  $('#speedFx').classList.remove('active');
   $('#impactOverlay').hidden = true;
   earnedPower = null; activeQuiz = null; nextQuizDistance = FIRST_QUIZ_DISTANCE;
   quizCursor = 0; quizCorrect = 0; quizAttempted = 0;
@@ -1441,6 +1551,7 @@ function resetRace(online = false, startAt = 0) {
   while (smoke.length) {
     const particle = smoke.pop();
     scene.remove(particle.puff);
+    particle.puff.geometry?.dispose();
     particle.puff.material.dispose();
   }
   updateHud();
@@ -1738,16 +1849,24 @@ function spawnImpactBurst(distance, lateral, kind) {
     crash: 0xffad32, shield: 0x7fffe6 }[kind] || 0xffffff;
   const group = new THREE.Group();
   group.position.copy(weaponPosition(distance, lateral, 1.5));
-  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .85, depthWrite: false });
+  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .9,
+    depthWrite: false, blending: THREE.AdditiveBlending });
+  const shine = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .72,
+    depthWrite: false, blending: THREE.AdditiveBlending });
   const ring = mesh(new THREE.TorusGeometry(1.3, .13, 6, 24), material, group);
   ring.rotation.x = Math.PI / 2;
+  const brightRing = mesh(new THREE.TorusGeometry(.92, .065, 5, 24), shine, group);
+  brightRing.rotation.x = Math.PI / 2;
+  const flash = mesh(new THREE.SphereGeometry(.7, 10, 8), shine, group);
+  flash.scale.y = .45;
   const count = kind === 'crash' ? 12 : 9;
   for (let i = 0; i < count; i++) {
     const angle = i * Math.PI * 2 / count;
     const radius = kind === 'pie' ? 1.25 + (i % 3) * .18 : 1.5;
     const spark = mesh(kind === 'pie' ? new THREE.SphereGeometry(.30 + (i % 2) * .12, 8, 6) :
       new THREE.ConeGeometry(kind === 'crash' ? .22 : .15, kind === 'crash' ? 1.0 : .58, 5),
-    material, group, Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+    i % 3 === 0 ? shine : material, group,
+    Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
     if (kind === 'pie') spark.scale.z = .23;
     else spark.rotation.z = angle - Math.PI / 2;
   }
@@ -1760,7 +1879,8 @@ function spawnImpactBurst(distance, lateral, kind) {
     mesh(new THREE.OctahedronGeometry(kind === 'crash' ? .75 : .5), material, group);
   }
   scene.add(group);
-  impactBursts.push({ group, age: 0, material, duration: kind === 'crash' ? .9 : .72 });
+  impactBursts.push({ group, age: 0, materials: [material, shine],
+    duration: kind === 'crash' ? .9 : .72 });
 }
 
 function updateImpactBursts(dt) {
@@ -1769,10 +1889,12 @@ function updateImpactBursts(dt) {
     burst.age += dt;
     burst.group.scale.setScalar(1 + burst.age * 2.2);
     burst.group.rotation.z += dt * 1.6;
-    burst.material.opacity = Math.max(0, .85 * (1 - burst.age / burst.duration));
+    const fade = Math.max(0, 1 - burst.age / burst.duration);
+    burst.materials[0].opacity = fade * .9;
+    burst.materials[1].opacity = fade * fade * .72;
     if (burst.age > burst.duration) {
       burst.group.traverse(object => object.geometry?.dispose());
-      burst.material.dispose();
+      burst.materials.forEach(material => material.dispose());
       scene.remove(burst.group);
       impactBursts.splice(i, 1);
     }
@@ -1898,11 +2020,8 @@ function handleWeaponEvent(event) {
 
 function spawnWeaponTrail(position, kind) {
   const color = kind === 'ball' ? 0xff719e : 0xfff9dc;
-  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .66,
-    depthWrite: false });
-  const puff = mesh(new THREE.SphereGeometry(kind === 'ball' ? .32 : .42, 8, 6), material, scene);
-  puff.position.copy(position);
-  smoke.push({ puff, life: .38, duration: .38, rise: .2 });
+  spawnVisualParticle(position, color, .38, kind === 'ball' ? .32 : .42,
+    .62, .2, null, true);
 }
 
 function updateWeapons(dt) {
@@ -2122,6 +2241,10 @@ function update(dt) {
       false, null, { kind: ai.hitKind, time: ai.hitTime });
   }
   if (onlineRace) syncRemoteKarts(dt);
+  for (const pickup of itemPickups) {
+    pickup.rotation.y += dt * 1.25;
+    pickup.position.y = pickup.userData.baseY + Math.sin(game.raceTime * 3 + pickup.userData.phase) * .25;
+  }
   if (game.mode === 'racing' && keys.drift && game.speed > 13) {
     lastSmoke += dt;
     if (lastSmoke > .055) {
@@ -2129,6 +2252,15 @@ function update(dt) {
       lastSmoke = 0;
     }
   }
+  const boosting = game.mode === 'racing' && game.boostTime > 0;
+  $('#speedFx').classList.toggle('active', boosting);
+  if (boosting) {
+    boostTrailTime += dt;
+    if (boostTrailTime > .075) {
+      spawnBoostTrail(at);
+      boostTrailTime = 0;
+    }
+  } else boostTrailTime = 0;
   updateWeapons(dt);
   updateImpactBursts(dt);
   updateImpactOverlay();

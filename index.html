@@ -6,12 +6,13 @@
     <meta name="theme-color" content="#10142e" />
     <meta name="description" content="Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้ ตอบคำถามรับพลังพิเศษ เพิ่มและแก้ข้อสอบได้ เล่นเดี่ยวหรือออนไลน์สูงสุด 50 คนต่อห้อง" />
     <title>Turbo Trail — เกมแข่งโกคาร์ตเพื่อการเรียนรู้</title>
-    <link rel="stylesheet" href="style.css?v=13-0" />
+    <link rel="stylesheet" href="style.css?v=14-0" />
   </head>
   <body>
     <main id="game" aria-label="เกมแข่งโกคาร์ต Turbo Trail">
       <canvas id="track" aria-label="สนามแข่งโกคาร์ต"></canvas>
       <div class="vignette" aria-hidden="true"></div>
+      <div id="speedFx" class="speed-fx" aria-hidden="true"></div>
 
       <header class="topbar">
         <div class="brand"><span class="brand-mark">✦</span> TURBO<span>TRAIL</span><small id="roomBadge" hidden></small></div>
@@ -124,6 +125,6 @@
         <div class="control-group actions"><button class="touch-button action-button drift-button" data-control="drift" aria-label="ดริฟต์">DRIFT</button><button class="touch-button action-button boost-button" data-control="boost" aria-label="ใช้บูสต์">BOOST</button><button class="touch-button action-button gas-button" data-control="gas" aria-label="เร่งความเร็ว">GO</button></div>
       </nav>
     </main>
-    <script type="module" src="game.js?v=13-0"></script>
+    <script type="module" src="game.js?v=14-0"></script>
   </body>
 </html>
